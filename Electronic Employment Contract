@@ -1,1 +1,1306 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>전자 근로 계약서</title>
+<script crossorigin src="https://unpkg.com/react@17/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
 
+<style>
+  /* 텍스트 스타일 */
+  body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; background-color: #f3f4f6; margin: 0; }
+  
+  /* PC 환경 레이아웃 */
+  @media (min-width: 769px) {
+    .sidebar { width: 450px; background: white; border-right: 1px solid #ddd; height: 100vh; position: fixed; left: 0; top: 0; overflow-y: auto; padding: 24px; z-index: 10; }
+    .main-preview.has-sidebar { margin-left: 450px; }
+  }
+
+  /* 모바일 환경 레이아웃 */
+  @media screen and (max-width: 768px) {
+    .sidebar { width: 100%; background: white; height: auto; position: relative; padding: 16px; border-bottom: 1px solid #ddd; z-index: 10; }
+    .main-preview { margin-left: 0 !important; padding: 10px !important; }
+    .mobile-scale { zoom: 0.45; -moz-transform: scale(0.45); -moz-transform-origin: top center; }
+  }
+
+   /* 미리보기 화면 */
+  .main-preview { display: flex; justify-content: center; padding: 20px; box-sizing: border-x: auto; }
+  .a4-page { width: 210mm; min-height: 297mm; padding: 15mm; background: white; box-shadow: 0 0 10px rgba(0,0,0,0.1); font-size: 14px; line-height: 1.5; color: black; box-sizing: border-box; flex-shrink: 0; }
+  
+  /* 공통 테이블 스타일 */
+  .c-table { width: 100%; border-collapse: collapse; border: 1.5px solid black; }
+  .c-table td, .c-table th { border: 1px solid black; padding: 8px; }
+  .bg-gray-label { background-color: #eeeeee; text-align: center; font-weight: bold; }
+  
+  /* 서명 패드 */
+  canvas { touch-action: none; border: 2px solid #cbd5e1; border-radius: 0.5rem; background: #fff; }
+  
+  /* 인쇄(PDF 변환) 설정 */
+  @media print {
+    @page { size: A4; margin: 10mm; }
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    html, body, #root { width: 100% !important; height: auto !important; display: block !important; margin: 0 !important; padding: 0 !important; background-color: white !important; }
+    body, html, .overflow-y-auto, .overflow-auto { overflow: visible !important; height: auto !important; }
+    body * { visibility: hidden; }
+    #print-area, #print-area * { visibility: visible; }
+    #print-area { position: absolute; top: 0; left: 0; width: 100%; margin: 0 !important; padding: 0 !important; display: block !important; }
+    .a4-page { width: 100% !important; min-height: auto !important; margin: 0 !important; padding: 0 !important; box-shadow: none !important; border: none !important; transform: none !important; zoom: 1 !important; }
+    .print-hidden { display: none !important; }
+    ::-webkit-scrollbar { display: none !important; }
+    .c-table { width: 100% !important; page-break-inside: auto; }
+    tr { page-break-inside: avoid; page-break-after: auto; }
+    .keep-together { page-break-inside: avoid !important; break-inside: avoid !important; }
+  }
+</style>
+</head>
+
+<body>
+<input type="hidden" id="data-contract-id" value="<?= contractId ?>" />
+<input type="hidden" id="data-view-mode" value="<?= viewMode ?>" />
+<div id="root"></div>
+
+<script type="text/babel">
+  const { useState, useRef, useEffect } = React;
+
+  // 아이콘
+  const IconBase = ({ children, className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`inline-block ${className || ''}`}>{children}</svg>);
+  const Lock = ({ className }) => <IconBase className={className}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></IconBase>;
+  const CheckCircle = ({ className }) => <IconBase className={className}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></IconBase>;
+  const PenTool = ({ className }) => <IconBase className={className}><path d="M12 19l7-7 3 3-7 7-3-3z"></path><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path><path d="M2 2l7.586 7.586"></path><circle cx="11" cy="11" r="2"></circle></IconBase>;
+  const Send = ({ className }) => <IconBase className={className}><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></IconBase>;
+  const Printer = ({ className }) => <IconBase className={className}><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2-2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></IconBase>;
+  const Eraser = ({ className }) => <IconBase className={className}><path d="M2.9 15.8a1 1 0 0 0-.9 1.2l2.5 9A1 1 0 0 0 5.6 27h12.8a1 1 0 0 0 1-1l2.5-9a1 1 0 0 0-.9-1.2c-1.1-.3-2.3-.5-3.5-.5s-2.4.2-3.5.5c-1.1.3-2.3.5-3.5.5s-2.4-.2-3.5-.5z" transform="translate(-2 -2) scale(0.9)"/></IconBase>;
+  const ChevronRight = ({ className }) => <IconBase className={className}><polyline points="9 18 15 12 9 6"></polyline></IconBase>;
+
+  const App = () => {
+
+   // 직인 이미지 불러오기
+   const sealImages = window.sealImages || {};
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ 전화번호 하이픈 처리
+  const autoHyphenPhone = (str) => {
+    const clean = String(str).replace(/[^0-9]/g, '');
+    if (clean.length <= 3) return clean;
+    if (clean.startsWith('02')) {
+      if (clean.length <= 5) return clean.replace(/(\d{2})(\d{1,3})/, '$1-$2');
+      if (clean.length <= 9) return clean.replace(/(\d{2})(\d{3})(\d{1,4})/, '$1-$2-$3');
+      return clean.replace(/(\d{2})(\d{4})(\d{1,4})/, '$1-$2-$3');
+    } else {
+      if (clean.length <= 7) return clean.replace(/(\d{3})(\d{1,4})/, '$1-$2');
+      if (clean.length <= 10) return clean.replace(/(\d{3})(\d{3})(\d{1,4})/, '$1-$2-$3');
+      return clean.replace(/(\d{3})(\d{4})(\d{1,4})/, '$1-$2-$3');
+    }
+  };
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ 주민등록번호 하이픈 처리
+  const autoHyphenRegNum = (str) => {
+    const clean = String(str).replace(/[^0-9]/g, '');
+    if (clean.length <= 6) return clean;
+    return clean.replace(/(\d{6})(\d{1,7})/, '$1-$2').slice(0, 14);
+  };
+
+  // ⭐ 법인별 정보
+  const companies = [ 
+    { name: '(주)케이프라이드', address: '강원도 횡성군 우천면 우천제2농공단지로 65-50', phone: 'T. 033-644-4467 F.033-644-1944', rep: '김도영', managerPhone: '033-340-0023', managerEmail: 'kpride@example.com', managerName: '송문주'},
+    { name: '㈜케이펙', address: '강원도 강릉시 정원로 54, 8층(교동, 주니어타운)', phone: 'T. 033-644-4467 F.033-644-1944', rep: '김도영', managerPhone: '033-340-0012', managerEmail: 'kpride@example.com', managerName: '하주연' },
+    { name: '백두대간영농조합법인', address: '강원도 강릉시 정원로 54, 8층(교동, 주니어타운)', phone: 'T. 033-644-4467 F.033-644-1944', rep: '김도영', managerPhone: '033-340-0021', managerEmail: 'kpride@example.com', managerName: '서영민' },
+    { name: '㈜보담', address: '강원도 원주시 저금어지길 456(가현동 강원LPC 2층)', phone: 'T. 033-644-4467 F.033-644-1944', rep: '이승수', managerPhone: '033-340-0020', managerEmail: 'kpride@example.com', managerName: '이선우' },
+    { name: '(주)마시타', address: '강원도 강릉시 정원로 54, 8층(교통, 주니어타운)', phone: 'T. 033-644-4467 F.033-644-1944', rep: '김주원', managerPhone: '033-340-0023', managerEmail: 'kpride@example.com', managerName: '송문주'}
+  ];
+
+  // 4-2. formData — 계약서 핵심 데이터 (Index.html) 
+  // ⭐ 계약서 초기 정보값 설정
+  const [formData, setFormData] = useState({
+    companyName: '(주)케이프라이드', companyAddress: '강원도 횡성군 우천면 우천제2농공단지로 65-50', companyPhone: 'T.033-644-4467 F.033-644-1944', repName: '김도영', managerPhone: '033-340-0023', managerEmail: 'kpride@example.com', managerName: '송문주',
+    contractPassword: '', empName: '', empRegNumber: '', empAddress: '', empPhone: '',
+    joinDate: new Date().toISOString().split('T')[0], contractType: 'regular', startDate: new Date().toISOString().split('T')[0], 
+    contractMonths: '', endDate: '', 
+    useProbation: false, probationStartDate: new Date().toISOString().split('T')[0], probationEndDate: '', probationMonths: '3', probationSalary: '',
+    workPlace: '새말센터', duties: '사무직', dutiesDirect: '', isDirectDuties: false,
+    weeklyWorkDays: '5', dailyWorkHours: '8', weeklyWorkHours: '40', 
+    startTime: '08:00', endTime: '17:00', breakTimeMinutes: '60', breakTimeStart: '11:30', breakTimeEnd: '12:30'
+  });
+
+  // 4-3. 기타 UI 상태 변수 (Index.html)
+  const [workerList, setWorkerList] = useState([{ name: '', password: '', email: '' }]);
+  const [sendMode, setSendMode] = useState('email');
+  const [step, setStep] = useState(1); 
+  const [loading, setLoading] = useState(false);
+  const [workerStep, setWorkerStep] = useState(1);
+  const [verificationInput, setVerificationInput] = useState('');
+  const [isIdentityVerified, setIsIdentityVerified] = useState(false);
+  const [isWorkerInfoSubmitted, setIsWorkerInfoSubmitted] = useState(false);
+  const [signatures, setSignatures] = useState({ sign1: null, sign2: null, sign3: null, sign4: null });
+  const [isManagerView, setIsManagerView] = useState(false); 
+  const [contractStatus, setContractStatus] = useState('DRAFT'); 
+  const [urlId, setUrlId] = useState(null);
+  const canvasRef = useRef(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [isInvalidLink, setIsInvalidLink] = useState(false);
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ 계약일(계샨용)
+  const calcEnd = (start, months) => {
+    if(!start || !months) return '';
+    const d = new Date(start); 
+    d.setMonth(d.getMonth() + parseInt(months)); 
+    d.setDate(d.getDate() - 1);
+    return d.toISOString().split('T')[0];
+  };
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ 계약일 표기
+  const formatDate = (d) => {
+    if (!d) return "      년      월      일";
+    let s = d;
+    if (typeof d === 'object') {
+      if (d.toISOString) s = d.toISOString().split('T')[0];
+      else return String(d);
+    }
+    const p = String(s).split('-');
+    if (p.length < 3) return s;
+    return `${p[0]}년 ${p[1]}월 ${p[2]}일`;
+  };
+
+  // ⭐ 기존 서명 보여주기
+  useEffect(() => {
+    if (workerStep >= 7 && workerStep <= 10 && canvasRef.current) {
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      let signKey = workerStep === 10 ? 'sign4' : `sign${workerStep - 6}`;
+      
+      if (signatures[signKey]) {
+        const img = new Image();
+        img.onload = () => {
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        };
+        img.src = signatures[signKey];
+      }
+    }
+  }, [workerStep]);
+  
+  useEffect(() => {
+    const idInput = document.getElementById('data-contract-id');
+    const modeInput = document.getElementById('data-view-mode');
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const id = urlParams.get('id') || (idInput ? idInput.value : null);
+    const mode = urlParams.get('mode') || (modeInput ? modeInput.value : null);
+    
+    setUrlId(id);
+
+    // ⭐ (근로자)접속 링크 유효성 검사
+    if (id && id !== "null" && id !== "") {
+      setLoading(true);
+      const timeoutId = setTimeout(() => { if(loading) { setLoading(false); alert("서버 응답 지연."); } }, 8000);
+
+      if (window.google && window.google.script) {
+        if (mode === 'view') {
+          setIsManagerView(true);
+          google.script.run.withSuccessHandler(data => {
+            clearTimeout(timeoutId); setLoading(false);
+            if (data) { 
+              setFormData(data); 
+              setSignatures({ sign1: data.sign1, sign2: data.sign2, sign3: data.sign3, sign4: data.sign4 }); 
+              setContractStatus(data.status || 'COMPLETED');
+              setStep(3); 
+            } else {
+              alert("유효하지 않거나 삭제된 문서입니다.");
+              setIsInvalidLink(true);
+            }
+          }).loadSignedData(id);
+        } else {
+          google.script.run.withSuccessHandler(data => {
+            clearTimeout(timeoutId); setLoading(false);
+            if (data === "ALREADY_COMPLETED") {
+              setStep(3); setContractStatus('COMPLETED');
+              return alert("이미 최종 완료된 계약서입니다.");
+            }
+            if (data) {
+              setFormData({ ...data, empName: data.empName || '', empPhone: data.empPhone || data.contractPassword || '' });
+              setContractStatus(data.status || 'DRAFT');
+              if (data.status === 'SIGNED_BY_WORKER') {
+                setSignatures({ sign1: data.sign1, sign2: data.sign2, sign3: data.sign3, sign4: data.sign4 });
+                setStep(3); 
+              } else {
+                setStep(2); setIsIdentityVerified(false);
+              }
+            } else { 
+              alert("유효하지 않은 링크입니다."); 
+              setIsInvalidLink(true);
+            }
+          }).loadDraftData(id);
+        }
+      } else { clearTimeout(timeoutId); setLoading(false); }
+    }
+  }, []);
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ 입력값 변경 처리 - 관리자 우측 화면
+  const handleChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    const newVal = type === 'checkbox' ? checked : value;
+
+    if (name === 'companySelect') {
+      const selected = companies.find(c => c.name === value);
+      setFormData({ ...formData, companyName: selected.name, companyAddress: selected.address, companyPhone: selected.phone, repName: selected.rep, managerPhone: selected.managerPhone, managerEmail: selected.managerEmail, managerName: selected.managerName });
+    } else if (name === 'joinDate') {
+      let up = { ...formData, joinDate: newVal, startDate: newVal, probationStartDate: newVal };
+      if(formData.probationMonths) up.probationEndDate = calcEnd(newVal, formData.probationMonths);
+      if(formData.contractType === 'contract' && formData.contractMonths && formData.contractMonths !== 'direct') up.endDate = calcEnd(newVal, formData.contractMonths);
+      setFormData(up);
+    } else if (name === 'probationMonths') {
+      setFormData({ ...formData, probationMonths: newVal, probationEndDate: calcEnd(formData.probationStartDate, newVal) });
+    } else if (name === 'contractMonths') {
+      if (newVal === 'direct') setFormData({ ...formData, contractMonths: newVal, endDate: '' });
+      else setFormData({ ...formData, contractMonths: newVal, endDate: calcEnd(formData.startDate, newVal) });
+    } else if (name === 'useProbation') {
+      if (newVal) setFormData({ ...formData, useProbation: newVal, probationEndDate: calcEnd(formData.probationStartDate, formData.probationMonths) });
+      else setFormData({ ...formData, useProbation: newVal });
+    } else if (name === 'probationStartDate') {
+      setFormData({ ...formData, probationStartDate: newVal, probationEndDate: calcEnd(newVal, formData.probationMonths) });
+    } else if (name === 'empRegNumber') {
+      setFormData({ ...formData, [name]: autoHyphenRegNum(newVal) });
+    } else if (name === 'empPhone') {
+      setFormData({ ...formData, [name]: autoHyphenPhone(newVal) });
+    } else if (name === 'dutiesSelect') {
+      if (newVal === '직접입력') setFormData({ ...formData, isDirectDuties: true, duties: formData.dutiesDirect });
+      else setFormData({ ...formData, isDirectDuties: false, duties: newVal });
+    } else if (name === 'dutiesDirect') {
+      setFormData({ ...formData, dutiesDirect: newVal, duties: newVal });
+    } else if (name === 'dailyWorkHours' || name === 'weeklyWorkDays') {
+        const daily = name === 'dailyWorkHours' ? parseFloat(newVal || 0) : parseFloat(formData.dailyWorkHours || 0);
+        const days = name === 'weeklyWorkDays' ? parseFloat(newVal || 0) : parseFloat(formData.weeklyWorkDays || 0);
+        const autoWeekly = (daily * days);
+        setFormData({ ...formData, [name]: newVal, weeklyWorkHours: String(autoWeekly) });
+    } else {
+      setFormData({ ...formData, [name]: newVal });
+    }
+  };
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ (관리자)근로자 발송 정보 입력 여부 & 발송 완료
+  const handleSend = () => {
+    for (let i = 0; i < workerList.length; i++) {
+      const w = workerList[i];
+      if (!w.name.trim()) {
+        return alert(`${i + 1}번째 근로자의 성명을 입력해 주세요.`);
+      }
+      if (!w.password.trim()) {
+        return alert(`${i + 1}번째 근로자의 전화번호를 입력해 주세요.`);
+      }
+      if (sendMode === 'email' && !w.email.trim()) {
+        return alert(`${i + 1}번째 근로자의 이메일을 입력해 주세요.`);
+      }
+    }
+
+    if(!confirm("발송하시겠습니까?")) return;
+    setLoading(true);
+    google.script.run.withSuccessHandler(res => {
+      setLoading(false); alert("발송 완료!");
+    }).sendBatchContracts({ ...formData, sendMode }, workerList);
+  };
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ (근로자)본인인증 확인
+  const checkPw = () => {
+    const cleanInput = verificationInput.replace(/[^0-9]/g, '');
+    const cleanStored = formData.contractPassword.replace(/[^0-9]/g, '');
+    if (cleanInput === cleanStored) { setIsIdentityVerified(true); } 
+    else alert("비밀번호 불일치");
+  };
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ (근로자)정보 입력 확인
+  const submitWorkerInfo = () => {
+    if(!formData.empName || !formData.empRegNumber || !formData.empAddress || !formData.empPhone) return alert("모든 정보를 입력해주세요.");
+    setIsWorkerInfoSubmitted(true);
+  };
+  
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ 서명 시작점 확인
+  const startDraw = (e) => { 
+    const ctx = canvasRef.current.getContext('2d'); 
+    ctx.lineWidth = 5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'black';
+    
+    const rect = canvasRef.current.getBoundingClientRect(); 
+    const x = (e.clientX||e.touches[0].clientX) - rect.left; 
+    const y = (e.clientY||e.touches[0].clientY) - rect.top; 
+    ctx.beginPath(); ctx.moveTo(x,y); setIsDrawing(true); 
+  };
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ 서명 그리기
+  const moveDraw = (e) => { 
+    if(!isDrawing) return; 
+    const ctx = canvasRef.current.getContext('2d'); 
+    const rect = canvasRef.current.getBoundingClientRect(); 
+    const x = (e.clientX||e.touches[0].clientX) - rect.left; 
+    const y = (e.clientY||e.touches[0].clientY) - rect.top; 
+    ctx.lineTo(x,y); 
+    ctx.stroke(); 
+  };
+  
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ 서명 지우기
+  const clearCanvas = () => {
+    const canvas = canvasRef.current;
+    if(canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    let signKey = workerStep === 10 ? 'sign4' : `sign${workerStep - 6}`;
+    setSignatures(prev => ({ ...prev, [signKey]: null }));
+  };
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ 서명 크기 조정
+  const getCompressedSignature = () => {
+    const canvas = canvasRef.current;
+    const mini = document.createElement('canvas');
+    mini.width = canvas.width / 2;
+    mini.height = canvas.height / 2;
+    const ctx = mini.getContext('2d');
+    ctx.drawImage(canvas, 0, 0, mini.width, mini.height);
+    return mini.toDataURL('image/png');
+  };
+  
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ (근로자)서명 확인
+  const saveSignatureAndNext = (signKey) => {
+    const canvas = canvasRef.current;
+    const blank = document.createElement('canvas'); blank.width = canvas.width; blank.height = canvas.height;
+    if(canvas.toDataURL() === blank.toDataURL()) return alert("서명을 해주세요.");
+    const currentSignData = getCompressedSignature(); 
+    setSignatures(prev => ({ ...prev, [signKey]: currentSignData }));
+    setWorkerStep(workerStep + 1);
+  };
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ (근로자)서명 확인
+  const finalSubmit = () => {
+    const canvas = canvasRef.current;
+    const blank = document.createElement('canvas'); blank.width = canvas.width; blank.height = canvas.height;
+    if(canvas.toDataURL() === blank.toDataURL()) return alert("서명을 해주세요.");
+    const finalSign = getCompressedSignature();
+    const finalSignatures = { ...signatures, sign4: finalSign };
+    
+    if(!confirm("서명을 제출하시겠습니까? 담당자 승인 후 계약이 최종 완료됩니다.")) return;
+    setLoading(true);
+    google.script.run.withSuccessHandler(() => {
+      setLoading(false); 
+      setSignatures(finalSignatures); 
+      setContractStatus('SIGNED_BY_WORKER');
+      setStep(3); 
+    }).saveContractData({ ...formData, ...finalSignatures, contractId: urlId });
+  };
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ (관리자)최종 승인 확인
+  const managerApprove = () => {
+    if(!confirm("이대로 계약을 최종 승인하고 직인을 날인하시겠습니까?\n근로자에게 완료 메일(PDF 첨부)이 자동 발송됩니다.")) return;
+    setLoading(true);
+    google.script.run.withSuccessHandler(() => {
+      setLoading(false);
+      setContractStatus('COMPLETED');
+      alert("최종 승인 및 발송이 완료되었습니다.");
+    }).approveContract({ ...formData, ...signatures, contractId: urlId });
+  };
+
+  // ⭐ 발송 최대 인원
+  const addWorker = () => { 
+    if (workerList.length >= 10) return alert("최대 10명"); setWorkerList([...workerList, { name: '', email: '', password: '' }]); };
+    const removeWorker = (index) => { if (workerList.length === 1) return; 
+    const newList = [...workerList]; newList.splice(index, 1); 
+    setWorkerList(newList); 
+  };
+
+  if (loading) return <div className="h-screen flex items-center justify-center font-bold text-xl">처리중...</div>;
+
+  // ⭐ (근로자)접속 링크 유효성 확인
+  if (isInvalidLink) {
+    return (
+      <div className="min-h-screen bg-gray-200 flex items-center justify-center p-4 font-sans">
+        <div className="bg-white p-10 rounded-xl shadow-2xl max-w-md w-full text-center border border-gray-300">
+          <div className="mb-6 flex justify-center">
+            <div className="bg-red-100 p-4 rounded-full">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-4">접속 불가</h2>
+          <p className="text-gray-600 leading-relaxed break-keep">
+            유효하지 않거나 이미 만료된 계약서 링크입니다.<br/>
+            문서가 삭제되었거나 기한이 지났을 수 있습니다.<br/>
+            <strong className="text-gray-800 mt-2 inline-block">담당자에게 다시 문의해 주세요.</strong>
+          </p>
+        </div>
+      </div>
+    );
+  }
+  
+  // ⭐ 근로자 화면
+  return (
+    <div className="bg-gray-200 min-h-screen font-sans flex flex-col items-center">
+      
+      {/* ⭐ (근로자)본인인증 */}
+      {step === 2 && !isIdentityVerified && !isManagerView && (
+        <div className="fixed inset-0 z-50 bg-gray-100 flex items-center justify-center p-4">
+          <div className="bg-white p-10 rounded-3xl shadow-2xl max-w-md w-full text-center border-2 border-blue-50">
+            <Lock className="w-12 h-12 mx-auto mb-4 text-blue-600 inline-block" />
+            <h2 className="text-2xl font-bold mb-2">본인인증</h2>
+            <p className="text-gray-500 mb-8 text-sm">비밀번호(전화번호)를 입력하세요.</p>
+            <input type="password" value={verificationInput} onChange={e=>setVerificationInput(e.target.value)} className="w-full p-5 border-2 rounded-2xl text-2xl text-center tracking-widest mb-6 focus:border-blue-500 outline-none" placeholder="전화번호" />
+            <button onClick={checkPw} className="w-full py-5 bg-blue-600 text-white rounded-2xl text-xl font-bold shadow-lg hover:bg-blue-700">인증하기</button>
+          </div>
+        </div>
+      )}
+
+      {/* ⭐ (근로자)정보 입력 */}
+      {step === 2 && isIdentityVerified && !isWorkerInfoSubmitted && !isManagerView && (
+        <div className="fixed inset-0 z-50 bg-white flex flex-col items-center justify-center p-6 overflow-y-auto">
+          <div className="w-full max-w-lg">
+            <div className="text-center mb-8">
+              <h2 className="text-3xl font-bold text-gray-900 mb-2">근로자 정보 확인</h2>
+              <p className="text-gray-500">정확한 계약 작성을 위해 정보를 확인해주세요.</p>
+            </div>
+            <div className="space-y-6">
+              <div><label className="block text-sm font-bold text-gray-700 mb-1">성 명</label><input type="text" name="empName" value={formData.empName} onChange={handleChange} className="w-full p-4 border rounded-lg text-lg bg-gray-50"/></div>
+              <div><label className="block text-sm font-bold text-gray-700 mb-1">연락처</label><input type="text" name="empPhone" value={formData.empPhone} onChange={handleChange} className="w-full p-4 border rounded-lg text-lg bg-gray-50"/></div>
+              <div><label className="block text-sm font-bold text-blue-700 mb-1">주민등록번호 (필수)</label><input type="text" name="empRegNumber" placeholder="예: 900101-1234567" value={formData.empRegNumber} onChange={handleChange} className="w-full p-4 border rounded-lg text-lg"/></div>
+              <div><label className="block text-sm font-bold text-blue-700 mb-1">현재 거주 주소 (필수)</label><input type="text" name="empAddress" placeholder="도로명 주소 입력" value={formData.empAddress} onChange={handleChange} className="w-full p-4 border rounded-lg text-lg"/></div>
+            </div>
+            <button onClick={submitWorkerInfo} className="w-full py-5 bg-blue-600 text-white rounded-xl font-bold text-xl mt-10 shadow-lg hover:bg-blue-700 transition">정보 입력 완료</button>
+          </div>
+        </div>
+      )}
+
+      {/* ⭐ 근로자 정보 입력 */}
+      {step === 2 && isIdentityVerified && isWorkerInfoSubmitted && !isManagerView && (
+        <div className="fixed inset-0 z-50 bg-white flex flex-col p-0">
+          <div className="bg-white border-b p-4 flex justify-between items-center sticky top-0 z-10 shadow-sm">
+            <span className="text-sm font-bold text-gray-500">Step {workerStep} / 10</span>
+            <h2 className="text-lg font-bold truncate px-2">{workerStep <= 6 ? '근로계약서 확인' : '동의 및 서명'}</h2>
+            <div className="w-10"></div>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto p-6 text-lg leading-relaxed text-gray-800 pb-32 break-keep">
+            {/* ⭐ [단계1]사용자 및 근로자 정보*/}
+            {workerStep === 1 && (
+              <div className="space-y-6">
+                <h3 className="text-2xl font-bold border-b-2 border-black pb-2 mb-4 text-center">근 로 계 약 서</h3>
+                <div className="text-right text-sm mb-4 font-bold">입사일 : {formatDate(formData.joinDate)}</div>
+                <table className="c-table mb-8 text-sm">
+                  <tbody>
+                    <tr><td rowSpan="3" className="bg-gray-label w-24">사용자<br/>("갑")</td><td className="bg-gray-label w-20">명 칭</td><td className="pl-4 font-bold">{formData.companyName}</td></tr>
+                    <tr><td className="bg-gray-label">주 소</td><td className="pl-4">{formData.companyAddress}</td></tr>
+                    <tr><td className="bg-gray-label">전화번호</td><td className="pl-4">{formData.companyPhone}</td></tr>
+                    <tr><td rowSpan="3" className="bg-gray-label">근로자<br/>(을)</td><td className="bg-gray-label">성명</td><td className="pl-4"><span>{formData.empName}</span> <span className="text-gray-600 ml-2">(주민등록번호: {formData.empRegNumber})</span></td></tr>
+                    <tr><td className="bg-gray-label">주 소</td><td className="pl-4">{formData.empAddress}</td></tr>
+                    <tr><td className="bg-gray-label">연락처</td><td className="pl-4">{formData.empPhone}</td></tr>
+                  </tbody>
+                </table>
+                <p><strong>{formData.companyName}</strong>에 재직 중 근로기준법과 취업규칙 및 제반규정을 성실히 준수할 것을 서약하고 다음과 같이 근로계약을 체결한다.</p>
+              </div>
+            )}
+            
+            {/* ⭐ [단계2]제1~2조*/}
+            {workerStep === 2 && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="font-bold text-base mb-1">제1조(목적)</h3>
+                  <p className="pl-4 text-base">본 근로계약서는 "갑"과 "을"이 근로계약을 체결함에 있어 임금, 근로시간 등 근로조건을 정하는 것을 목적으로 한다.</p> 
+                </div>
+                <div>
+                  <h3 className="font-bold text-base mb-1">제2조(근로계약기간)</h3>
+                  <table className="c-table mt-2 text-sm">
+                    <colgroup>
+                      <col className="w-24 bg-gray-label"/><col />
+                    </colgroup>
+                    <tbody>
+                      <tr>
+                        <td className="bg-gray-label">구 분</td>
+                        <td className="bg-gray-label">근 로 계 약 기 간</td>
+                      </tr>
+                      <tr>
+                        <td className="pl-2">{formData.contractType === 'regular' ? '■' : '□'} 정규직</td>
+                        <td className="pl-2">"갑"은 "을"을 기간의 정함이 없는 근로자로서 정년 시까지 고용을 보장한다.<br/>({formatDate(formData.startDate)} ~ 정년 시까지 고용 보장)</td>
+                      </tr>
+                      <tr>
+                        <td className="pl-2">{formData.contractType === 'contract' ? '■' : '□'} 계약직</td>
+                        <td className="pl-2">{formatDate(formData.startDate)} ~ {formatDate(formData.endDate)}
+                          <span className="ml-2">({formData.contractMonths === 'direct' ? '별도협의' : formData.contractMonths + ' 개월'})</span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="pl-2">{formData.useProbation ? '■' : '□'} 수습기간</td>
+                        <td className="pl-2">1. 채용일로부터 {formData.probationMonths}개월간 1개월 단위기간으로 종료되는 수습및시용 기간으로 한다. 해당기간 동안 업무적격여부 판단에 따라 수습및시용 기간 중이라도 계약의 해지 또는 본채용을 거부할 수 있다.<br/>2. 업무적격여부 판단기준은 수습평가서에 의해 결정 한다.<br/>3. 본인은 '갑'의 관련규정에 의거 채용일로부터 {formData.probationMonths}개월간 수습및시용 근로자로서 임금을 하향하여 지급받음에 이의를 제기하지 아니한다.<br/>(기간: {formData.useProbation ? formatDate(formData.probationStartDate) + " ~ " + formatDate(formData.probationEndDate) : "      년      월      일 ~      년      월      일까지"} / 월 {formData.probationSalary || '별도 정함'}원)</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>)}
+            
+            {/* ⭐ [단계3]제3~5조*/}
+            {workerStep === 3 && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="font-bold text-base mb-1">제3조(근무장소)</h3>
+                  <p className="pl-4 text-base">"을"의 근무 장소는 {formData.workPlace}(으)로 한다. 다만 "갑"은 인사명령에 의거 "을"의 근무 장소를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.</p>
+                </div>
+                <div>
+                  <h3 className="font-bold text-base mb-1">제4조(담당업무)</h3>
+                  <p className="pl-4 text-base">"을"의 담당업무는 {formData.duties}(으)로  한다. 다만, "갑"은 인사명령에 의거 "을"의 담당업무를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.</p>
+                </div>
+                <div>
+                  <h3 className="font-bold text-base mb-1">제5조(임금)</h3>
+                  <div className="pl-4 text-base">
+                    <p className="mb-1">( 1 )  임금형태  :  "갑"과 "을"은 월급제로 임금계약을 체결한다. (기본급과 법정 제수당이 포함된 "포괄임금")</p>
+                    <p className="mb-1">( 2 )  임금내용  :  월급총액, 월급의 구성내역, 지급방법 등은 임금계약서에 의한다.</p>
+                    <p className="mb-1">( 3 )  사정변경  :  "갑"은 계약기간 중 제반 경영여건상 처우조건이 불가피하거나, 인사상 처우조정 사유발생시에는 제반기준에 의거 임금을 조정할 수 있다.</p>
+                    <p className="mb-1">( 4 )  임금인상  :  "갑"과 "을"은 근로계약기간이 종료되는 시점에서 업무상 필요성, "갑"의 경영사정에 의거 재계약을 체결할 시 상호 대등한 입장으로 임금인상 등을 협의할 수 있다.<br/>다만 임금내용의 변동이 없는 경우, 또는 임금인상에 대한 합의가 성립 되지 않는 경우 이전과 동일한 금액으로 반복하여 체결하며 "을"은 이에 이의를 제기하지 않는다.</p>
+                    <p className="mb-1">( 5 )  임금산정일 및 지급일자  : 초일부터 말일까지 계산하여 익월 10일에 지급한다.<br/>(단 공휴일일경우에는 그 다음 영업일에 지급한다.)</p>
+                    <p>( 6 )  비밀유지  :  임금은 회사의 규정과 상사의 지시에 따른 본인의 근로제공에 대한 모든 금전적 보상임을 확인하며 직원상호간 비밀의무를 반드시 준수한다.</p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {/* ⭐ [단계4]제6조*/}
+            {workerStep === 4 && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="font-bold text-base mb-1">제6조(근로시간 및 휴게시간)</h3>
+                  <div className="pl-4 text-base">
+                    <p className="mb-2">( 1 ) "을"의 1주간, 1일의 소정근로시간, 휴게시간은 다음표와 같다. 단, 휴일은 회사 사정에 따라 근무할 수있고, 근로자는 정당한 사유없이 거부할 수 없다.</p>
+                    <table className="c-table my-2 text-center table-fixed text-sm">
+                    <colgroup>
+                      <col className="w-[20%]"/>
+                      <col className="w-[48%]"/>
+                      <col className="w-[32%]"/>
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <td className="bg-gray-label">1 주간</td>
+                        <td className="bg-gray-label">근로시간(시업시각, 종업시각 등)</td>
+                        <td className="bg-gray-label">휴게시간</td>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        {formData.isBiweekly ? (
+                          <>
+                            <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleWeek}</td>
+                            <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleWork}</td>
+                            <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleBreak}</td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="text-center">{formData.weeklyWorkHours}시간</td>
+                            <td className="text-center">
+                              1일 {formData.dailyWorkHours}시간 
+                              {formData.weeklyWorkDays !== '5' && ` 주 ${formData.weeklyWorkDays}일`}
+                              <br/>[ 시업 {formData.startTime} ~ 종업 {formData.endTime} ]
+                            </td>
+                            <td className="text-center">{formData.breakTimeMinutes}분 <br/>[ {formData.breakTimeStart}~{formData.breakTimeEnd} ]</td>
+                          </>
+                        )}
+                      </tr>
+                    </tbody>
+                  </table>
+                    <p className="mt-2">* 업무상황 및 근무 여건에 따라 근로 시간 및 휴게시간은 조정 및 변경 될수 있다.</p>
+                    <p>* 업무상황 및 경영사정에 따라 근무일은 교대제로 운영할 수 있다.</p>
+                    <p className="mb-2 mt-2">( 2 ) 시간외근로(연장.야간.휴일근로) : "갑"과"을"은 본 근로계약서 작성으로 회사의 업무 특성상 수반되는 고정적인 시간외근로가 필요한 경우 이에 임할 것을 합의하며, "갑"은 "을"의 임금(연봉월액) 지급시 이를 포함한 포괄임금제로 지급함에 있어 "을"은 이에 동의한다. ( 시간외수당 가산율은 통상시급의 100분의 50 으로 한다 )</p>
+                    <p>( 3 ) "을"은 고정적인 시간외근로외에 시간외 근로가 필요한 경우 "갑"에게 보고한 후 승인을 득하여야 하며, 승인을 득하지 아니한 시간외근로는 근로시간으로 보지 아니한다.</p>
+                  </div>
+                </div>
+              </div>)}
+            
+            {/* ⭐ [단계5]제7~8조*/}
+            {workerStep === 5 && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="font-bold text-base mb-1">제7조(휴일 및 휴가)</h3>
+                  <div className="pl-4 text-base">
+                    <p className="mb-1">( 1 ) 휴일 : 주휴일(1주간 소정근로일수 개근시 주1회), 근로자의 날, 관공서공휴일규정에 따른 공휴일과 대체공휴일<br/> ※ 업무 특성 상 특정 주에 변경되는 주휴일은 휴일변경(대체)하는 것이며, 근로자는 이에 동의한다.</p>
+                    <p className="mb-1">( 2 ) 휴가 : 연차유급휴가는 "근로기준법"에 의한다.<br/>( 1년간 80퍼센트 이상 출근한 근로자에게 15일 / 1년 미만 근로자의 경우 1개월 개근시 1일 )<br/> ※ 근로자가 본인에게 발생한 연차유급휴가일수 보다 더 많은 연차휴가를 사용한 경우 이는 "사용자"가 "근로자"에게 향후 발생할 연차휴가를 선사용하도록 허용한 것이므로 "근로자"가 퇴사하는 경우 더 많이 사용한 연차휴가 일수만큼 임금을 공제할 수 있다.<br/> ※ 1주간 소정근로시간 15시간 미만인 자는 휴일 및 휴가 규정은 적용하지 아니한다. (근로자의 날 제외)</p>
+                  </div>
+                </div>
+                <div>
+                  <h3 className="font-bold text-base mb-1">제8조(근로계약의 종료 등)</h3>
+                  <div className="pl-4 text-base">
+                    <p className="mb-1">( 1 ) "을"이 정년에(만60세) 도달하거나 약정한 근로계약기간의 만료로 근로계약은 자동 종료된다.</p>
+                    <p className="mb-1">( 2 ) 근로계약의 만료일이 지정된 경우 계약기간 만료시 본 계약은 자동해지 된다.</p>
+                    <p className="mb-1">( 3 ) "갑"의 해지사유 : "갑"은 정년도래, 기간만료 이외 "갑"의 관련규정 등에서 정한 정당한 사유가 있는 경우에는 "을"의 의사에도 불구하고 근로계약을 해지할 수 있다. 다만, "갑"은 근로기준법에서 규정하고 있는 해고예고의 예외가 되는 근로자의 귀책사유 이외에는 해고예정일 30일전에 서면으로 통보해야 한다.</p>
+                    <p>( 4 ) "을"의 해지사유 : "을"이 정년도래, 기간만료 이외 계약을 해지하고자 하는 경우에는 30일전에 "갑"에게 통보하여야 하고 후임자에게 업무의 인수인계를 하여야 하며, 이를 해태함으로 인하여 "갑"에게 손해가 발생하는 경우에는 이를 배상하여야 한다.</p>
+                  </div>
+                </div>
+              </div>)
+            }
+
+            {/* ⭐ [단계6]제7~11조*/}
+            {workerStep === 6 && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="font-bold text-base mb-1">제9조(의무)</h3>
+                  <p className="pl-4 text-base">"갑"은 "을"의 근무조건 향상을 위하여 최선을 다하여야 하며, "을"은 신의성실의 원칙에 의하여 근로를 제공하여야 한다. 특히 "을"은 "갑"이 정한 안전에 관한 제 규칙과 지시사항을 위반하여 발생한 제반사고는 "을"의 귀책사유로 한다.</p>
+                </div>
+                <div>
+                  <h3 className="font-bold text-base mb-1">제10조(손해배상)</h3>
+                  <p className="pl-4 text-base">"을"이 계약기간 중 고의 또는 과실로 "갑"에게 손해를 입힌 때에는 이를 배상하여야 한다.</p>
+                </div>
+                <div>
+                  <h3 className="font-bold text-base mb-1">제11조(기타 근로조건)</h3>
+                  <p className="pl-4 text-base">본 계약서를 작성함에 있어 "을"은 "갑"의 취업규칙 및 제 규정을 열람하였으며 이 계약에 정함이 없는 사항은 관계법령 및 "갑"의 취업규칙 등에 정한 바에 따르며 상기사실을 확실히 하기 위하여 본 계약서를 2통 작성하여 사용자와 근로자가 각 1통씩 보관키로 한다.</p>
+                </div>
+              </div>)
+            }
+            
+            {/* ⭐ [단계7]전자근로계약 체결 동의서*/}
+            {workerStep === 7 && (
+              <div className="space-y-4">
+                <div className="border-2 border-blue-500 rounded-lg p-4 bg-blue-50">
+                  <h3 className="font-bold text-lg mb-2 text-blue-900">[전자근로계약 체결 동의서]</h3>
+                  <p className="mb-1">1) 「전자문서 및 전자거래 기본법」 제4조 제1항에 따라, 본 근로계약서를 전자적 형태(URL 접속 및 전자서명)로 작성 및 체결하는 것에 동의합니다.</p>
+                  <p className="mb-1">2) 「전자서명법」 제3조 제1항 및 제2항에 따라, 본인이 등록한 전자서명이 자필 서명 또는 날인과 동일한 법적 효력을 가짐을 인정합니다.</p>
+                  <p className="mb-1">3) 「전자서명법」 제18조에 근거하여 본인 인증(휴대폰 번호 등)에 대한 관리 의무 및 보안 책임을 확인합니다.</p>
+                  <p className="mb-1">4) 「근로기준법」 제17조 제2항에 따라 근로계약서의 전자적 방법(이메일 또는 링크 등)을 통한 교부에 동의합니다.</p>
+                </div>
+                <p className="font-bold text-center">위 내용에 동의하며 서명합니다.</p>
+                <div className="border-2 border-gray-400 rounded bg-white touch-none h-40 max-w-[600px] mx-auto">
+                  <canvas 
+                    ref={canvasRef} 
+                    width={Math.min(window.innerWidth - 40, 600)} 
+                    height={160} 
+                    onMouseDown={startDraw} 
+                    onMouseMove={moveDraw} 
+                    onMouseUp={()=>setIsDrawing(false)} 
+                    onMouseLeave={()=>setIsDrawing(false)} 
+                    onTouchStart={startDraw} 
+                    onTouchMove={moveDraw} 
+                    onTouchEnd={()=>setIsDrawing(false)} 
+                    className="w-full h-full"
+                  />
+                </div>
+                <div className="text-center">
+                  <button onClick={clearCanvas} className="text-red-500 text-sm mt-2">
+                  <Eraser className="inline w-3 h-3"/> 다시 쓰기</button>
+                </div>
+              </div>)}
+            
+            {/* ⭐ [단계8]연장/야간/휴일근로 동의서*/}
+            {workerStep === 8 && (
+              <div className="space-y-4">
+                <div className="border-2 border-blue-500 rounded-lg p-4 bg-blue-50">
+                  <h3 className="font-bold text-lg mb-2 text-blue-900">[연장/야간/휴일근로 동의서]</h3>
+                  <p className="text-base mb-2">1) 「근로기준법」 제53조(연장근로의 제한) 제1항에 따라 사업장의 업무상황 및 근무표 등에 의하여 요구되는 연장,야간,휴일 근로에 동의합니다.</p>
+                  <p className="text-base mb-4">2) 「근로기준법」 제70조(야간근로와 휴일근로의 제한) 제1항 - 18세 이상 여성이 오후 10시부터  오전6시까지 근로 및 휴일근로에 동의합니다.</p>
+                </div>
+                <p className="font-bold text-center">위 내용에 동의하며 서명합니다.</p>
+                <div className="border-2 border-gray-400 rounded bg-white touch-none h-40 max-w-[600px] mx-auto">
+                  <canvas 
+                    ref={canvasRef} 
+                    width={Math.min(window.innerWidth - 40, 600)} 
+                    height={160} 
+                    onMouseDown={startDraw} 
+                    onMouseMove={moveDraw} 
+                    onMouseUp={()=>setIsDrawing(false)} 
+                    onMouseLeave={()=>setIsDrawing(false)} 
+                    onTouchStart={startDraw} 
+                    onTouchMove={moveDraw} 
+                    onTouchEnd={()=>setIsDrawing(false)} 
+                    className="w-full h-full"
+                  />
+                </div>
+                <div className="text-center">
+                  <button onClick={clearCanvas} className="text-red-500 text-sm mt-2">
+                    <Eraser className="inline w-3 h-3"/> 다시 쓰기
+                  </button>
+                </div>
+              </div>
+            )}
+            
+            {/* ⭐ [단계9]동의 및 교부확인*/}
+            {workerStep === 9 && (
+              <div className="space-y-4">
+                <div className="border-2 border-blue-500 rounded-lg p-4 bg-blue-50">
+                  <h3 className="font-bold text-lg mb-2 text-blue-900">[동의 및 교부확인]</h3>
+                  <p className="text-base mb-2">1) 임금 산정방식 및 지급방법의 결정에 동의합니다.</p>
+                  <p className="text-base mb-2">2) 퇴사 시 잔여 임금 및 퇴직금 등은 최초 도래하는 당사 임금지급일에 지급하는 것에 동의합니다.</p>
+                  <p className="text-base pl-4 mb-1"> (1) 임금 지급일 : 매월 초일부터 말일까지의 임금을 익월 15일 지급</p>
+                  <p className="text-base pl-4 mb-4"> (2) 퇴직연금 부담금  납입일 : 매월 초일부터 말일까지의 임금에 대한 부담금을 익월 25일 납입</p>
+                </div>
+                <p className="font-bold text-center">위 내용에 동의하며 서명합니다.</p>
+                <div className="border-2 border-gray-400 rounded bg-white touch-none h-40 max-w-[600px] mx-auto">
+                  <canvas 
+                    ref={canvasRef} 
+                    width={Math.min(window.innerWidth - 40, 600)} 
+                    height={160} 
+                    onMouseDown={startDraw} 
+                    onMouseMove={moveDraw} 
+                    onMouseUp={()=>setIsDrawing(false)} 
+                    onMouseLeave={()=>setIsDrawing(false)} 
+                    onTouchStart={startDraw} 
+                    onTouchMove={moveDraw} 
+                    onTouchEnd={()=>setIsDrawing(false)} 
+                    className="w-full h-full"
+                  />
+                </div>
+                <div className="text-center">
+                  <button onClick={clearCanvas} className="text-red-500 text-sm mt-2">
+                    <Eraser className="inline w-3 h-3"/> 다시 쓰기
+                  </button>
+                </div>
+              </div>
+            )}
+            
+            {/* ⭐ [단계10]최종 서명*/}
+            {workerStep === 10 && (
+              <div className="space-y-6">
+                <div className="font-bold text-lg text-center bg-yellow-100 p-4 rounded-lg border border-yellow-300">💡 근로자 본인은 위 내용을 충분히 숙지하였으며, 그 내용에 동의하며 근로계약서 사본 또는 부본을 교부받았음을 확인합니다.</div>
+                <div className="bg-white border-2 border-gray-400 p-4 rounded h-96 overflow-y-scroll text-xs leading-relaxed">
+                  <h1 className="text-2xl font-bold text-center mb-6">근 로 계 약 서</h1>
+                  <div className="text-right mb-2 text-sm font-bold">입사일 : {formatDate(formData.joinDate)}</div>
+                  <table className="c-table mb-8 text-sm">
+                    <tbody>
+                      <tr><td rowSpan="3" className="bg-gray-label w-24">사용자<br/>("갑")</td><td className="bg-gray-label w-20">명 칭</td><td className="pl-4 font-bold">{formData.companyName}</td></tr>
+                      <tr><td className="bg-gray-label">주 소</td><td className="pl-4">{formData.companyAddress}</td></tr>
+                      <tr><td className="bg-gray-label">전화번호</td><td className="pl-4">{formData.companyPhone}</td></tr>
+                      <tr><td rowSpan="3" className="bg-gray-label">근로자<br/>(을)</td><td className="bg-gray-label">성명</td><td className="pl-4"><span>{formData.empName}</span> <span className="text-gray-600 ml-2">(주민등록번호: {formData.empRegNumber})</span></td></tr>
+                      <tr><td className="bg-gray-label">주 소</td><td className="pl-4">{formData.empAddress}</td></tr>
+                      <tr><td className="bg-gray-label">연락처</td><td className="pl-4">{formData.empPhone}</td></tr>
+                    </tbody>
+                  </table>
+
+                  <div className="mb-4 border-b border-black pb-2 text-sm"><strong>{formData.companyName}</strong>에 재직 중 근로기준법과 취업규칙 및 제반규정을 성실히 준수할 것을 서약하고 다음과 같이 근로계약을 체결한다.</div>
+                  <div className="space-y-4 break-keep text-sm">
+                    <div className="keep-together"><strong>제1조(목적)</strong><br/>본 근로계약서는 "갑"과 "을"이 근로계약을 체결함에 있어 임금, 근로시간 등 근로조건을 정하는 것을 목적으로 한다.</div>
+                    <div className="keep-together"><strong>제2조(근로계약기간)</strong><table className="c-table mt-1 text-sm"><tbody><tr><td className="pl-2 w-24">{formData.contractType === 'regular' ? '■' : '□'} 정규직</td><td className="pl-2">"갑"은 "을"을 기간의 정함이 없는 근로자로서 정년 시까지 고용을 보장한다. <br/>({formatDate(formData.startDate)} ~ 정년 시까지 고용 보장)</td></tr><tr><td className="pl-2">{formData.contractType === 'contract' ? '■' : '□'} 계약직</td><td className="pl-2">{formatDate(formData.startDate)} ~ {formatDate(formData.endDate)} <span className="ml-2">({formData.contractMonths === 'direct' ? '별도협의' : formData.contractMonths + ' 개월'})</span></td></tr><tr><td className="pl-2">{formData.useProbation ? '■' : '□'} 수습기간</td><td className="pl-2">1. 채용일로부터 {formData.probationMonths}개월간 1개월 단위기간으로 종료되는 수습및시용 기간으로 한다. 해당기간 동안 업무적격여부 판단에 따라 수습및시용 기간 중이라도 계약의 해지 또는 본채용을 거부할 수 있다.<br/>2. 업무적격여부 판단기준은 수습평가서에 의해 결정 한다.<br/>3. 본인은 '갑'의 관련규정에 의거 채용일로부터 {formData.probationMonths}개월간 수습및시용 근로자로서 임금을 하향하여 지급받음에 이의를 제기하지 아니한다.<br/>(기간: {formData.useProbation ? formatDate(formData.probationStartDate) + " ~ " + formatDate(formData.probationEndDate) : "      년      월      일 ~      년      월      일까지"} / 월 {formData.probationSalary || '별도 정함'}원)</td></tr></tbody></table></div>
+                    <div className="keep-together"><strong>제3조(근무장소)</strong><br/>"을"의 근무 장소는 {formData.workPlace}(으)로 한다. 다만 "갑"은 인사명령에 의거 "을"의 근무 장소를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.</div>
+                    <div className="keep-together"><strong>제4조(담당업무)</strong><br/>"을"의 담당업무는 {formData.duties}(으)로 한다. 다만, "갑"은 인사명령에 의거 "을"의 담당업무를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.</div>
+                    <div className="keep-together"><strong>제5조(임금)</strong><br/>(1) 임금형태 : "갑"과 "을"은 월급제로 임금계약을 체결한다. (기본급과 법정 제수당이 포함된 "포괄임금")<br/>(2) 임금내용 : 월급총액, 월급의 구성내역, 지급방법 등은 임금계약서에 의한다.<br/>(3) 사정변경 : "갑"은 계약기간 중 제반 경영여건상 처우조건이 불가피하거나, 인사상 처우조정 사유발생시에는 제반기준에 의거 임금을 조정할 수 있다.<br/>(4) 임금인상 : "갑"과 "을"은 근로계약기간이 종료되는 시점에서 업무상 필요성, "갑"의 경영사정에 의거 재계약을 체결할 시 상호 대등한 입장으로 임금인상 등을 협의할 수 있다. 다만 임금내용의 변동이 없는 경우, 또는 임금인상에 대한 합의가 성립 되지 않는 경우 이전과 동일한 금액으로 반복하여 체결하며 "을"은 이에 이의를 제기하지 않는다.<br/>(5) 임금산정일 및 지급일자 : 초일부터 말일까지 계산하여 익월 10일에 지급한다. (단 공휴일일경우에는 그 다음 영업일에 지급한다.)<br/>(6) 비밀유지 : 임금은 회사의 규정과 상사의 지시에 따른 본인의 근로제공에 대한 모든 금전적 보상임을 확인하며 직원상호간 비밀의무를 반드시 준수한다.</div>
+                    
+                    <div className="keep-together"><strong>제6조(근로시간 및 휴게시간)</strong><br/>
+                      (1) "을"의 1주간, 1일의 소정근로시간, 휴게시간은 다음표와 같다. 단, 휴일은 회사 사정에 따라 근무할 수있고, 근로자는 정당한 사유없이 거부할 수 없다.<br/>
+                      <table className="c-table mb-2 mt-2 text-sm">
+                        <colgroup>
+                          <col className="w-[20%]"/>
+                          <col className="w-[48%]"/>
+                          <col className="w-[32%]"/>
+                        </colgroup>
+                        <thead>
+                          <tr>
+                            <td className="bg-gray-label">1 주간</td>
+                            <td className="bg-gray-label">근로시간(시업시각, 종업시각 등)</td>
+                            <td className="bg-gray-label">휴게시간</td>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            {formData.isBiweekly ? (
+                              <>
+                                <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleWeek}</td>
+                                <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleWork}</td>
+                                <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleBreak}</td>
+                              </>
+                            ) : (
+                              <>
+                                <td className="text-center">{formData.weeklyWorkHours}시간</td>
+                                <td className="text-center">
+                                  1일 {formData.dailyWorkHours}시간 
+                                  {formData.weeklyWorkDays !== '5' && ` 주 ${formData.weeklyWorkDays}일`}<br/>
+                                  [ 시업 {formData.startTime} ~ 종업 {formData.endTime} ]
+                                </td>
+                                <td className="text-center">{formData.breakTimeMinutes}분 <br/>[ {formData.breakTimeStart}~{formData.breakTimeEnd} ]</td>
+                              </>
+                            )}
+                          </tr>
+                        </tbody>
+                      </table>
+                      * 업무상황 및 근무 여건에 따라 근로 시간 및 휴게시간은 조정 및 변경 될수 있다.<br/>
+                      * 업무상황 및 경영사정에 따라 근무일은 교대제로 운영할 수 있다.<br/><br/>
+                      (2) 시간외근로(연장.야간.휴일근로) : "갑"과"을"은 본 근로계약서 작성으로 회사의 업무 특성상 수반되는 고정적인 시간외근로가 필요한 경우 이에 임할 것을 합의하며, "갑"은 "을"의 임금(연봉월액) 지급시 이를 포함한 포괄임금제로 지급함에 있어 "을"은 이에 동의한다. (시간외수당 가산율은 통상시급의 100분의 50으로 한다)<br/>(3) "을"은 고정적인 시간외근로외에 시간외 근로가 필요한 경우 "갑"에게 보고한 후 승인을 득하여야 하며, 승인을 득하지 아니한 시간외근로는 근로시간으로 보지 아니한다.
+                    </div>
+                    <div className="keep-together">
+                      <strong>제7조(휴일 및 휴가)</strong><br/>
+                      (1) 휴일 : 주휴일(1주간 소정근로일수 개근시 주1회), 근로자의 날, 관공서공휴일규정에 따른 공휴일과 대체공휴일<br/> ※ 업무 특성 상 특정 주에 변경되는 주휴일은 휴일변경(대체)하는 것이며, 근로자는 이에 동의한다.<br/>
+                      (2) 휴가 : 연차유급휴가는 "근로기준법"에 의한다. (1년간 80퍼센트 이상 출근한 근로자에게 15일 / 1년 미만 근로자의 경우 1개월 개근시 1일)<br/> ※ 근로자가 본인에게 발생한 연차유급휴가일수 보다 더 많은 연차휴가를 사용한 경우 이는 "사용자"가 "근로자"에게 향후 발생할 연차휴가를 선사용하도록 허용한 것이므로 "근로자"가 퇴사하는 경우 더 많이 사용한 연차휴가 일수만큼 임금을 공제할 수 있다.<br/> ※ 1주간 소정근로시간 15시간 미만인 자는 휴일 및 휴가 규정은 적용하지 아니한다. (근로자의 날 제외)
+                    </div>
+                    <div className="keep-together">
+                      <strong>제8조(근로계약의 종료 등)</strong><br/>
+                      (1) "을"이 정년에(만60세) 도달하거나 약정한 근로계약기간의 만료로 근로계약은 자동 종료된다.<br/>
+                      (2) 근로계약의 만료일이 지정된 경우 계약기간 만료시 본 계약은 자동해지 된다.<br/>
+                      (3) "갑"의 해지사유 : "갑"은 정년도래, 기간만료 이외 "갑"의 관련규정 등에서 정한 정당한 사유가 있는 경우에는 "을"의 의사에도 불구하고 근로계약을 해지할 수 있다. 다만, "갑"은 근로기준법에서 규정하고 있는 해고예고의 예외가 되는 근로자의 귀책사유 이외에는 해고예정일 30일전에 서면으로 통보해야 한다.<br/>
+                      (4) "을"의 해지사유 : "을"이 정년도래, 기간만료 이외 계약을 해지하고자 하는 경우에는 30일전에 "갑"에게 통보하여야 하고 후임자에게 업무의 인수인계를 하여야 하며, 이를 해태함으로 인하여 "갑"에게 손해가 발생하는 경우에는 이를 배상하여야 한다.
+                    </div>
+                    <div className="keep-together"><strong>제9조(의무)</strong><br/>"갑"은 "을"의 근무조건 향상을 위하여 최선을 다하여야 하며, "을"은 신의성실의 원칙에 의하여 근로를 제공하여야 한다. 특히 "을"은 "갑"이 정한 안전에 관한 제 규칙과 지시사항을 위반하여 발생한 제반사고는 "을"의 귀책사유로 한다.</div>
+                    <div className="keep-together"><strong>제10조(손해배상)</strong><br/>"을"이 계약기간 중 고의 또는 과실로 "갑"에게 손해를 입힌 때에는 이를 배상하여야 한다.</div>
+                    <div className="keep-together"><strong>제11조(기타 근로조건)</strong><br/>본 계약서를 작성함에 있어 "을"은 "갑"의 취업규칙 및 제 규정을 열람하였으며 이 계약에 정함이 없는 사항은 관계법령 및 "갑"의 취업규칙 등에 정한 바에 따르며 상기사실을 확실히 하기 위하여 본 계약서를 2통 작성하여 사용자와 근로자가 각 1통씩 보관키로 한다.</div>
+                  </div>
+                  <div className="mt-6 space-y-2 text-sm">
+                    <div className="border p-2 relative rounded keep-together"><strong>[전자근로계약 체결 동의서]</strong> 동의함 {signatures.sign1 && <img src={signatures.sign1} className="w-20 absolute top-0 right-2 mix-blend-multiply" alt="sign1"/>}</div>
+                    <div className="border p-2 relative rounded keep-together"><strong>[연장/야간/휴일근로 동의서]</strong> 동의함 {signatures.sign2 && <img src={signatures.sign2} className="w-20 absolute top-0 right-2 mix-blend-multiply" alt="sign2"/>}</div>
+                    <div className="border p-2 relative rounded keep-together"><strong>[동의 및 교부확인]</strong> 동의함 {signatures.sign3 && <img src={signatures.sign3} className="w-20 absolute top-0 right-2 mix-blend-multiply" alt="sign3"/>}</div>
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <p className="font-bold text-center mb-2">최종 서명 (계약 체결)</p>
+                  <div className="border-2 border-gray-400 rounded bg-white touch-none h-40 max-w-[600px] mx-auto">
+                    <canvas 
+                      ref={canvasRef} 
+                      width={Math.min(window.innerWidth - 40, 600)} 
+                      height={160} 
+                      onMouseDown={startDraw} 
+                      onMouseMove={moveDraw} 
+                      onMouseUp={()=>setIsDrawing(false)} 
+                      onMouseLeave={()=>setIsDrawing(false)} 
+                      onTouchStart={startDraw} 
+                      onTouchMove={moveDraw} 
+                      onTouchEnd={()=>setIsDrawing(false)} 
+                      className="w-full h-full"
+                    />
+                  </div>
+                  <div className="text-center"><button onClick={clearCanvas} className="text-red-500 text-sm mt-2"><Eraser className="inline w-3 h-3"/> 다시 쓰기</button></div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ⭐ 최종완료버튼*/}
+          <div className="fixed bottom-0 left-0 right-0 p-4 z-20 border-t bg-white flex gap-3 shadow-lg">
+            {workerStep > 1 && <button onClick={()=>setWorkerStep(workerStep-1)} className="flex-1 py-5 bg-gray-200 text-gray-700 font-bold rounded-lg text-lg hover:bg-gray-300">이전</button>}
+            {workerStep < 7 && (<button onClick={() => setWorkerStep(workerStep + 1)} className="py-5 flex-[2] bg-blue-600 text-white font-bold rounded-lg shadow-lg text-lg hover:bg-blue-700 flex justify-center items-center gap-2">다음 내용 확인 <ChevronRight className="ml-2"/></button>)}
+            {workerStep >= 7 && workerStep < 10 && (<button onClick={() => saveSignatureAndNext(`sign${workerStep - 6}`)} className="py-5 flex-[2] bg-green-600 text-white font-bold rounded-lg shadow-lg text-lg hover:bg-green-700 flex justify-center items-center gap-2">서명 저장 후 다음 <ChevronRight className="ml-2"/></button>)}
+            {workerStep === 10 && (<button onClick={finalSubmit} className="py-5 flex-[2] bg-blue-600 text-white font-bold rounded-lg shadow-lg text-lg hover:bg-blue-700 flex justify-center items-center gap-2">최종 제출 및 완료</button>)}
+          </div>
+        </div>
+      )}
+
+      {/* ⭐ (관리자)작성 화면 - 패널 */}
+      <div className="w-full relative bg-gray-200 min-h-screen flex flex-col">
+        {(step === 1 || (step === 3 && isManagerView && contractStatus === 'SIGNED_BY_WORKER')) && (
+          <div className="sidebar print-hidden shadow-lg">
+            {step === 1 ? (
+              <>
+                <h2 className="text-xl font-bold mb-6 text-blue-900 flex items-center"><PenTool className="mr-2"/> 고용주 근로계약서 작성</h2>
+                <div className="space-y-6 text-sm">
+                  
+                  {/* 1. 기본 정보 */}
+                  <div className="space-y-4">
+                    <div>
+                      <label className="font-bold text-gray-700 mb-1 block">계약 법인</label>
+                      <select name="companySelect" className="w-full p-2 border rounded bg-white font-bold text-blue-900" onChange={handleChange} value={formData.companyName}>
+                        {companies.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="font-bold text-gray-700 mb-1 block">입사일</label>
+                      <input type="date" name="joinDate" className="w-full p-2 border rounded bg-gray-50" value={formData.joinDate} onChange={handleChange}/>
+                    </div>
+                  </div>
+
+                  {/* 2. 계약 형태 */}
+                  <div className="p-4 bg-blue-50 rounded border border-blue-200">
+                    <h3 className="font-bold text-blue-800 mb-2">계약 형태</h3>
+                    <div className="flex gap-6 mb-3">
+                        <label className="flex items-center cursor-pointer"><input type="radio" name="contractType" value="regular" checked={formData.contractType==='regular'} onChange={handleChange} className="mr-2"/> 정규직</label>
+                        <label className="flex items-center cursor-pointer"><input type="radio" name="contractType" value="contract" checked={formData.contractType==='contract'} onChange={handleChange} className="mr-2"/> 계약직</label>
+                    </div>
+                    
+                    {formData.contractType === 'contract' && (
+                        <div className="flex items-center gap-2 mb-3 bg-white p-2 rounded border">
+                            <select name="contractMonths" className="w-24 p-2 border text-sm" value={formData.contractMonths} onChange={handleChange}><option value="">선택</option><option value="direct">직접</option><option value="3">3개월</option><option value="6">6개월</option><option value="12">1년</option></select>
+                            <input type="date" name="endDate" className="flex-1 p-2 border text-sm" value={formData.endDate} onChange={handleChange} readOnly={formData.contractMonths!=='direct'}/>
+                        </div>
+                    )}
+
+                    <div className="border-t border-blue-200 pt-3">
+                        <label className="flex items-center font-bold text-gray-700 mb-2 cursor-pointer"><input type="checkbox" name="useProbation" checked={formData.useProbation} onChange={handleChange} className="mr-2"/>수습 적용</label>
+                        {formData.useProbation && (
+                            <div className="flex flex-col gap-2 bg-white p-2 rounded border">
+                                <div className="flex items-center gap-2">
+                                    <input type="date" name="probationStartDate" className="w-1/3 p-1 border text-sm" value={formData.probationStartDate} onChange={handleChange}/>
+                                    <span>~</span>
+                                    <input type="date" name="probationEndDate" className="w-1/3 p-1 border text-sm bg-gray-100" value={formData.probationEndDate} readOnly/>
+                                    <select name="probationMonths" className="flex-1 p-1 border text-sm" value={formData.probationMonths} onChange={handleChange}><option value="1">1개월</option><option value="2">2개월</option><option value="3">3개월</option><option value="6">6개월</option></select>
+                                </div>
+                                <input type="text" name="probationSalary" className="w-full p-2 border text-sm" value={formData.probationSalary} onChange={handleChange} placeholder="수습급여 (예: 2,000,000)"/>
+                            </div>
+                        )}
+                    </div>
+                  </div>
+
+                  {/* 3. 근무장소 및 업무 */}
+                  <div className="border-t pt-4">
+                    <h3 className="font-bold text-gray-800 mb-2">1. 근무장소 및 업무</h3>
+                    <div className="flex gap-2 mb-2">
+                        <input type="text" name="workPlace" className="w-1/2 p-2 border rounded" value={formData.workPlace} onChange={handleChange} placeholder="근무장소"/>
+                        <select name="dutiesSelect" className="w-1/2 p-2 border rounded" value={formData.isDirectDuties ? '직접입력' : formData.duties} onChange={handleChange}>
+                            <option value="사무직">사무직</option><option value="영업직">영업직</option><option value="생산직">생산직</option><option value="직접입력">직접입력</option>
+                        </select>
+                    </div>
+                    {formData.isDirectDuties && <input type="text" name="dutiesDirect" className="w-full p-2 border rounded" value={formData.dutiesDirect} onChange={handleChange} placeholder="담당업무 입력" />}
+                  </div>
+
+                  {/* 4. 근로시간 및 휴게시간 */}
+                  <div className="border-t pt-4">
+                    <h3 className="font-bold text-gray-800 mb-2">2. 근로/휴게시간</h3>
+                    <div className="bg-blue-50 p-4 rounded border border-blue-200 space-y-4">
+                      {!formData.isBiweekly ? (
+                        <>
+                          <div className="flex gap-4 items-end">
+                            <div className="flex-1">
+                              <label className="text-gray-600 text-xs block mb-1 font-bold">1일 근로시간</label>
+                              <div className="flex items-center gap-1">
+                                <input type="number" name="dailyWorkHours" className="w-full p-2 border rounded text-right font-bold" value={formData.dailyWorkHours} onChange={handleChange}/>
+                                <span className="text-sm shrink-0">시간</span> 
+                              </div>
+                            </div>
+                            <div className="flex-1">
+                              <label className="text-gray-600 text-xs block mb-1 font-bold">주 근무일수</label>
+                              <div className="flex items-center gap-1">
+                                <input type="number" name="weeklyWorkDays" className="w-full p-2 border rounded text-right font-bold" value={formData.weeklyWorkDays} onChange={handleChange}/>
+                                <span className="text-sm shrink-0">일</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* (시업 ~ 종업) */}
+                          <div>
+                            <label className="text-gray-600 text-xs block mb-1 font-bold">근무 시간 (시업 ~ 종업)</label>
+                            <div className="flex items-center gap-2">
+                              <input type="time" name="startTime" className="w-1/2 p-2 border rounded text-sm font-bold" value={formData.startTime} onChange={handleChange}/>
+                              <span className="text-gray-400">~</span>
+                              <input type="time" name="endTime" className="w-1/2 p-2 border rounded text-sm font-bold" value={formData.endTime} onChange={handleChange}/>
+                            </div>
+                          </div>
+
+                          {/* 휴게 시간 */}
+                          <div className="bg-white p-3 rounded border">
+                            <label className="font-bold text-gray-600 text-xs block mb-1">휴게 시간</label>
+                            <div className="flex flex-col gap-2">
+                              <div className="flex-1 flex items-center gap-1">
+                                <span className="text-sm shrink-0">총</span>
+                                <input type="text" name="breakTimeMinutes" className="w-12 p-2 border rounded text-center text-sm font-bold" value={formData.breakTimeMinutes} onChange={handleChange}/>
+                                <span className="text-sm shrink-0 mr-1">분</span>
+                              </div>
+                              <div className="flex-1 flex items-center gap-1">
+                                <input type="time" name="breakTimeStart" className="w-full p-2 border rounded text-sm font-bold" value={formData.breakTimeStart} onChange={handleChange}/>
+                                <span className="text-gray-300">~</span>
+                                <input type="time" name="breakTimeEnd" className="w-full p-2 border rounded text-sm font-bold" value={formData.breakTimeEnd} onChange={handleChange}/>
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+
+                      <div className="space-y-3 bg-white p-3 rounded border border-blue-300">
+                        <p className="text-xs text-blue-600 font-bold mb-1">※ 아래 적으신 내용이 계약서 표에 그대로 출력됩니다.</p>
+                        <div>
+                          <label className="text-gray-600 text-xs block mb-1 font-bold">1주간 (구분란)</label>
+                          <input type="text" name="customScheduleWeek" value={formData.customScheduleWeek || ''} onChange={handleChange} className="w-full p-2 border rounded text-sm" placeholder="예: 격주 휴무 등" />
+                        </div>
+                        <div>
+                          <label className="text-gray-600 text-xs block mb-1 font-bold">근로시간 (시업~종업)</label>
+                          <textarea name="customScheduleWork" value={formData.customScheduleWork || ''} onChange={handleChange} className="w-full p-2 border rounded text-sm h-16" placeholder="예: 1주: 08:00~17:00&#10;2주: 08:00~12:00" />
+                        </div>
+                        <div>
+                          <label className="text-gray-600 text-xs block mb-1 font-bold">휴게시간</label>
+                          <textarea name="customScheduleBreak" value={formData.customScheduleBreak || ''} onChange={handleChange} className="w-full p-2 border rounded text-sm h-16" placeholder="예: 1주: 60분&#10;2주: 없음" />
+                        </div>
+                      </div>
+                      )}
+
+                      <div className="pt-2 border-t border-blue-200">
+                        <label className="flex items-center gap-2 text-sm font-bold text-gray-800 cursor-pointer w-fit">
+                          <input 
+                            type="checkbox" 
+                            name="isBiweekly" 
+                            checked={formData.isBiweekly || false} 
+                            onChange={e => setFormData({...formData, isBiweekly: e.target.checked})} 
+                            className="w-4 h-4 text-blue-600"
+                          />
+                        </label>
+                      </div>
+
+                    </div>
+                  </div>
+
+                  {/* 5. 근로자 발송 정보 */}
+                  <div className="p-4 bg-green-50 rounded border border-green-100">
+                    <div className="flex justify-between items-center mb-3">
+                        <h3 className="font-bold text-green-800">근로자 발송 정보</h3>
+                        <div className="flex gap-3">
+                            <label className="flex items-center cursor-pointer"><input type="radio" name="sendMode" value="sms" checked={sendMode === 'sms'} onChange={(e) => setSendMode(e.target.value)} className="mr-1"/>문자</label>
+                            <label className="flex items-center cursor-pointer"><input type="radio" name="sendMode" value="email" checked={sendMode === 'email'} onChange={(e) => setSendMode(e.target.value)} className="mr-1"/>이메일</label>
+                        </div>
+                    </div>
+                    
+                    {workerList.map((w, i) => (
+                        <div key={i} className="mb-4 p-4 bg-white border rounded shadow-sm relative pt-12">
+                          <div className="absolute top-0 left-0 right-0 px-3 py-2 flex justify-between items-center border-b border-gray-50 bg-gray-50/50 rounded-t">
+                            <span className="text-xs font-bold text-blue-600">근로자 {i + 1}</span>
+                            {workerList.length > 1 && (
+                              <button onClick={() => removeWorker(i)} className="text-gray-400 hover:text-red-500 font-bold text-xl leading-none">×</button>
+                            )}
+                          </div>
+                          <div className="space-y-2">
+                            <input placeholder="성 명" value={w.name} onChange={e=>{const n=[...workerList];n[i].name=e.target.value;setWorkerList(n)}} className="border p-2 w-full rounded text-sm"/>
+                            <input placeholder="전화번호" value={w.password} onChange={e=>{const n=[...workerList];n[i].password=autoHyphenPhone(e.target.value);setWorkerList(n)}} className="border p-2 w-full rounded text-sm bg-yellow-50"/>
+                            {sendMode === 'email' && (<input placeholder="이메일" value={w.email} onChange={e=>{const n=[...workerList];n[i].email=e.target.value;setWorkerList(n)}} className="border p-2 w-full rounded text-sm"/>)}
+                          </div>
+                        </div>
+                    ))}
+                    
+                    <button onClick={addWorker} className="w-full text-blue-600 border border-blue-300 bg-white py-2 rounded mt-2 hover:bg-blue-50 font-bold">+ 근로자 추가</button>
+                  </div>
+
+                  <button onClick={handleSend} className="w-full py-4 bg-blue-600 text-white font-bold rounded-lg shadow-lg hover:bg-blue-700 flex justify-center items-center text-lg"><Send className="mr-2"/> 발송하기</button>
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col items-center w-full h-full justify-center mt-20">
+                  <div className="mb-4 bg-blue-100 p-4 rounded-full">
+                    <PenTool className="w-10 h-10 text-blue-600"/>
+                  </div>
+
+                  {/* ⭐ (관리자)최종 승인 요청 */}
+                  <h2 className="text-2xl font-bold text-gray-800 mb-2">관리자 승인 대기</h2>
+                  <p className="text-gray-500 mb-6 break-keep text-center">
+                    근로자 서명이 완료되었습니다.<br/>
+                    계약 내용을 최종 확인하신 후 아래 버튼을 눌러 승인(직인 날인)해 주세요.
+                  </p>
+                  <button onClick={managerApprove} className="w-full px-6 py-4 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 shadow-lg text-lg">
+                      승인 및 직인 날인
+                  </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ⭐ 완성본*/}
+        {(step === 1 || (step === 3 && !(contractStatus === 'SIGNED_BY_WORKER' && !isManagerView))) && (
+          <div className={`main-preview ${(step === 1 || (step === 3 && isManagerView && contractStatus === 'SIGNED_BY_WORKER')) ? 'has-sidebar' : ''} ${(step === 3 && contractStatus === 'COMPLETED') ? 'hidden print:flex' : ''}`} id="print-area">
+            <div className="a4-page mobile-scale relative">
+              <h1 className="text-4xl font-extrabold text-center mb-10 underline tracking-widest">근 로 계 약 서</h1>
+              <div className="text-right text-sm mb-4 font-bold">입사일 : {formatDate(formData.joinDate)}</div>
+              
+              <table className="c-table mb-8 text-sm">
+                <tbody>
+                  <tr><td rowSpan="3" className="bg-gray-label w-24">사용자<br/>("갑")</td><td className="bg-gray-label w-20">명 칭</td><td className="pl-4 font-bold">{formData.companyName}</td></tr>
+                  <tr><td className="bg-gray-label">주 소</td><td className="pl-4">{formData.companyAddress}</td></tr>
+                  <tr><td className="bg-gray-label">전화번호</td><td className="pl-4">{formData.companyPhone}</td></tr>
+                  <tr><td rowSpan="3" className="bg-gray-label">근로자<br/>("을")</td><td className="bg-gray-label">성 명</td><td className="pl-4"><span>{formData.empName}</span> <span className="text-gray-600 ml-2">(주민등록번호: {formData.empRegNumber})</span></td></tr>
+                  <tr><td className="bg-gray-label">주 소</td><td className="pl-4">{formData.empAddress}</td></tr>
+                  <tr><td className="bg-gray-label">연락처</td><td className="pl-4">{formData.empPhone}</td></tr>
+                </tbody>
+              </table>
+
+              <div className="mb-8 border-b border-black pb-4 text-base"><strong>{formData.companyName}</strong>에 재직 중 근로기준법과 취업규칙 및 제반규정을 성실히 준수할 것을 서약하고 다음과 같이 근로계약을 체결한다.</div>
+              
+              <div className="space-y-6 text-sm leading-relaxed text-justify break-keep">
+                <div className="keep-together"><strong>제1조(목적)</strong><br/>본 근로계약서는 "갑"과 "을"이 근로계약을 체결함에 있어 임금, 근로시간 등 근로조건을 정하는 것을 목적으로 한다.</div>
+                <div className="keep-together"><strong>제2조(근로계약기간)</strong>
+                  <table className="c-table mt-1 text-sm">
+                    <tbody>
+                      <tr><td className="pl-2 w-24 bg-gray-label">{formData.contractType === 'regular' ? '■' : '□'} 정규직</td><td className="pl-2">"갑"은 "을"을 기간의 정함이 없는 근로자로서 정년 시까지 고용을 보장한다. <br/>({formatDate(formData.startDate)} ~ 정년 시까지 고용 보장)</td></tr>
+                      <tr><td className="pl-2 bg-gray-label">{formData.contractType === 'contract' ? '■' : '□'} 계약직</td><td className="pl-2">{formatDate(formData.startDate)} ~ {formatDate(formData.endDate)} <span className="ml-2">({formData.contractMonths === 'direct' ? '별도협의' : formData.contractMonths + ' 개월'})</span></td></tr>
+                      <tr><td className="pl-2 bg-gray-label">{formData.useProbation ? '■' : '□'} 수습기간</td><td className="pl-2">1. 채용일로부터 {formData.probationMonths}개월간 1개월 단위 기간으로 종료되는 수습및시용 기간으로 한다. 해당기간 동안 업무적격여부 판단에 따라 수습및시용 기간 중이라도 계약의 해지 또는 본채용을 거부할 수 있다.<br/>2. 업무적격여부 판단기준은 수습평가서에 의해 결정 한다.<br/>3. 본인은 '갑'의 관련규정에 의거 채용일로부터 ({formData.probationMonths})개월간 수습및시용 근로자로서 임금을 하향하여 지급받음에 이의를 제기하지 아니한다.<br/>(기간: {formData.useProbation ? formatDate(formData.probationStartDate) + " ~ " + formatDate(formData.probationEndDate) : "      년      월      일 ~      년      월      일까지"} / 월 {formData.probationSalary || '별도 정함'}원)</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div className="keep-together"><strong>제3조(근무장소)</strong><br/>"을"의 근무 장소는 {formData.workPlace}(으)로 한다. 다만 "갑"은 인사명령에 의거 "을"의 근무 장소를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.</div>
+                <div className="keep-together"><strong>제4조(담당업무)</strong><br/>"을"의 담당업무는 {formData.duties}(으)로  한다. 다만, "갑"은 인사명령에 의거 "을"의 담당업무를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.</div>
+                <div className="keep-together"><strong>제5조(임금)</strong><br/>(1) 임금형태 : "갑"과 "을"은 월급제로 임금계약을 체결한다. (기본급과 법정 제수당이 포함된 "포괄임금")<br/>(2) 임금내용 : 월급총액, 월급의 구성내역, 지급방법 등은 임금계약서에 의한다.<br/>(3) 사정변경 : "갑"은 계약기간 중 제반 경영여건상 처우조건이 불가피하거나, 인사상 처우조정 사유발생시에는 제반기준에 의거 임금을 조정할 수 있다.<br/>(4) 임금인상 : "갑"과 "을"은 근로계약기간이 종료되는 시점에서 업무상 필요성, "갑"의 경영사정에 의거 재계약을 체결할 시 상호 대등한 입장으로 임금인상 등을 협의할 수 있다. 다만 임금내용의 변동이 없는 경우, 또는 임금인상에 대한 합의가 성립 되지 않는 경우 이전과 동일한 금액으로 반복하여 체결하며 "을"은 이에 이의를 제기하지 않는다.<br/>(5) 임금산정일 및 지급일자 : 초일부터 말일까지 계산하여 익월 10일에 지급한다. (단 공휴일일경우에는 그 다음 영업일에 지급한다.)<br/>(6) 비밀유지 : 임금은 회사의 규정과 상사의 지시에 따른 본인의 근로제공에 대한 모든 금전적 보상임을 확인하며 직원상호간 비밀의무를 반드시 준수한다.</div>
+                
+                <div className="keep-together"><strong>제6조(근로시간 및 휴게시간)</strong><br/>
+                  (1) "을"의 1주간, 1일의 소정근로시간, 휴게시간은 다음표와 같다. 단, 휴일은 회사 사정에 따라 근무할 수있고, 근로자는 정당한 사유없이 거부할 수 없다.<br/>
+                  <table className="c-table mt-2 mb-2 text-center table-fixed text-sm">
+                    <colgroup>
+                      <col className="w-[20%]"/>
+                      <col className="w-[48%]"/>
+                      <col className="w-[32%]"/>
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <td className="bg-gray-label">1 주간</td>
+                        <td className="bg-gray-label">근로시간(시업시각, 종업시각 등)</td>
+                        <td className="bg-gray-label">휴게시간</td>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        {formData.isBiweekly ? (
+                          <>
+                            <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleWeek}</td>
+                            <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleWork}</td>
+                            <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleBreak}</td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="text-center">{formData.weeklyWorkHours}시간</td>
+                            <td className="text-center">
+                              1일 {formData.dailyWorkHours}시간 
+                              {formData.weeklyWorkDays !== '5' && ` 주 ${formData.weeklyWorkDays}일`}
+                              <br/>[ 시업 {formData.startTime} ~ 종업 {formData.endTime} ]
+                            </td>
+                            <td className="text-center">{formData.breakTimeMinutes}분 <br/>[ {formData.breakTimeStart}~{formData.breakTimeEnd} ]</td>
+                          </>
+                        )}
+                      </tr>
+                    </tbody>
+                  </table>
+                  * 업무상황 및 근무 여건에 따라 근로 시간 및 휴게시간은 조정 및 변경 될수 있다.<br/>
+                  * 업무상황 및 경영사정에 따라 근무일은 교대제로 운영할 수 있다.<br/><br/>
+                  (2) 시간외근로(연장.야간.휴일근로) : "갑"과"을"은 본 근로계약서 작성으로 회사의 업무 특성상 수반되는 고정적인 시간외근로가 필요한 경우 이에 임할 것을 합의하며, "갑"은 "을"의 임금(연봉월액) 지급시 이를 포함한 포괄임금제로 지급함에 있어 "을"은 이에 동의한다. (시간외수당 가산율은 통상시급의 100분의 50으로 한다)<br/>
+                  (3) "을"은 고정적인 시간외근로외에 시간외 근로가 필요한 경우 "갑"에게 보고한 후 승인을 득하여야 하며, 승인을 득하지 아니한 시간외근로는 근로시간으로 보지 아니한다.
+                </div>
+                <div className="keep-together">
+                  <strong>제7조(휴일 및 휴가)</strong><br/>
+                  (1) 휴일 : 주휴일(1주간 소정근로일수 개근시 주1회), 근로자의 날, 관공서공휴일규정에 따른 공휴일과 대체공휴일<br/> ※ 업무 특성 상 특정 주에 변경되는 주휴일은 휴일변경(대체)하는 것이며, 근로자는 이에 동의한다.<br/>
+                  (2) 휴가 : 연차유급휴가는 "근로기준법"에 의한다. (1년간 80퍼센트 이상 출근한 근로자에게 15일 / 1년 미만 근로자의 경우 1개월 개근시 1일)<br/> ※ 근로자가 본인에게 발생한 연차유급휴가일수 보다 더 많은 연차휴가를 사용한 경우 이는 "사용자"가 "근로자"에게 향후 발생할 연차휴가를 선사용하도록 허용한 것이므로 "근로자"가 퇴사하는 경우 더 많이 사용한 연차휴가 일수만큼 임금을 공제할 수 있다.<br/> ※ 1주간 소정근로시간 15시간 미만인 자는 휴일 및 휴가 규정은 적용하지 아니한다. (근로자의 날 제외)
+                </div>
+                <div className="keep-together">
+                  <strong>제8조(근로계약의 종료 등)</strong><br/>
+                  (1) "을"이 정년에(만60세) 도달하거나 약정한 근로계약기간의 만료로 근로계약은 자동 종료된다.<br/>
+                  (2) 근로계약의 만료일이 지정된 경우 계약기간 만료시 본 계약은 자동해지 된다.<br/>
+                  (3) "갑"의 해지사유 : "갑"은 정년도래, 기간만료 이외 "갑"의 관련규정 등에서 정한 정당한 사유가 있는 경우에는 "을"의 의사에도 불구하고 근로계약을 해지할 수 있다. 다만, "갑"은 근로기준법에서 규정하고 있는 해고예고의 예외가 되는 근로자의 귀책사유 이외에는 해고예정일 30일전에 서면으로 통보해야 한다.<br/>
+                  (4) "을"의 해지사유 : "을"이 정년도래, 기간만료 이외 계약을 해지하고자 하는 경우에는 30일전에 "갑"에게 통보하여야 하고 후임자에게 업무의 인수인계를 하여야 하며, 이를 해태함으로 인하여 "갑"에게 손해가 발생하는 경우에는 이를 배상하여야 한다.
+                </div>
+                <div className="keep-together"><strong>제9조(의무)</strong><br/>"갑"은 "을"의 근무조건 향상을 위하여 최선을 다하여야 하며, "을"은 신의성실의 원칙에 의하여 근로를 제공하여야 한다. 특히 "을"은 "갑"이 정한 안전에 관한 제 규칙과 지시사항을 위반하여 발생한 제반사고는 "을"의 귀책사유로 한다.</div>
+                <div className="keep-together"><strong>제10조(손해배상)</strong><br/>"을"이 계약기간 중 고의 또는 과실로 "갑"에게 손해를 입힌 때에는 이를 배상하여야 한다.</div>
+                <div className="keep-together"><strong>제11조(기타 근로조건)</strong><br/>본 계약서를 작성함에 있어 "을"은 "갑"의 취업규칙 및 제 규정을 열람하였으며 이 계약에 정함이 없는 사항은 관계법령 및 "갑"의 취업규칙 등에 정한 바에 따르며 상기사실을 확실히 하기 위하여 본 계약서를 2통 작성하여 사용자와 근로자가 각 1통씩 보관키로 한다.</div>
+              </div>
+
+              <div className="mt-8 space-y-6 text-sm leading-relaxed text-justify break-keep">
+                {/* 1. 전자계약 동의서 */}
+                <div className="border border-gray-400 rounded-lg p-4 print:border-black print:rounded-none keep-together">
+                  <h3 className="font-bold text-base mb-2">[전자근로계약 체결 동의서]</h3>
+                  <p className="mb-1">1) 「전자문서 및 전자거래 기본법」 제4조 제1항에 따라, 본 근로계약서를 전자적 형태(URL 접속 및 전자서명)로 작성 및 체결하는 것에 동의합니다.</p>
+                  <p className="mb-1">2) 「전자서명법」 제3조 제1항 및 제2항에 따라, 본인이 등록한 전자서명이 자필 서명 또는 날인과 동일한 법적 효력을 가짐을 인정합니다.</p>
+                  <p className="mb-1">3) 「전자서명법」 제18조에 근거하여 본인 인증(휴대폰 번호 등)에 대한 관리 의무 및 보안 책임을 확인합니다.</p>
+                  <p className="mb-1">4) 「근로기준법」 제17조 제2항에 따라 근로계약서의 전자적 방법(이메일 또는 링크 등)을 통한 교부에 동의합니다.</p>
+                  <div className="text-left mt-4 border-t border-gray-200 print:border-black pt-4 flex items-center justify-between">
+                    <div>
+                      <span className="mr-2">근로자 :</span>
+                      <span className="inline-block min-w-[70px] text-center font-bold">{formData.empName}</span>
+                    </div>
+                    <span className="text-gray-400 text-sm relative inline-block mr-4">( 서명 또는 인 )
+                      {signatures.sign1 && <img src={signatures.sign1} className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-28 h-auto max-w-none object-contain mix-blend-multiply" alt="서명1"/>}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 2. 연장/야간/휴일 동의서 */}
+                <div className="border border-gray-400 rounded-lg p-4 print:border-black print:rounded-none keep-together">
+                  <h3 className="font-bold text-base mb-2">[연장/야간/휴일근로 동의서]</h3>
+                  <p className="mb-1">1) 「근로기준법」 제53조(연장근로의 제한) 제1항에 따라 사업장의 업무상황 및 근무표 등에 의하여 요구되는 연장,야간,휴일 근로에 동의합니다.</p>
+                  <p className="mb-4">2) 「근로기준법」 제70조(야간근로와 휴일근로의 제한) 제1항 - 18세 이상 여성이 오후 10시부터 오전6시까지 근로 및 휴일근로에 동의합니다.</p>
+                  <div className="text-left mt-4 border-t border-gray-200 print:border-black pt-4 flex items-center justify-between">
+                    <div>
+                      <span className="mr-2">근로자 :</span>
+                      <span className="inline-block min-w-[60px] text-center font-bold">{formData.empName}</span>
+                    </div>
+                    <span className="text-gray-400 text-sm relative inline-block mr-4">( 서명 또는 인 )
+                      {signatures.sign2 && <img src={signatures.sign2} className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-28 h-auto max-w-none object-contain mix-blend-multiply" alt="서명2"/>}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 3. 교부 확인 */}
+                <div className="border border-gray-400 rounded-lg p-4 print:border-black print:rounded-none keep-together">
+                  <h3 className="font-bold text-base mb-2">[동의 및 교부확인]</h3>
+                  <p className="mb-1">1) 임금 산정방식 및 지급방법의 결정에 동의합니다.</p>
+                  <p className="mb-1">2) 퇴사 시 잔여 임금 및 퇴직금 등은 최초 도래하는 당사 임금지급일에 지급한는 것에 동의합니다.</p>
+                  <p className="pl-4 mb-1"> (1) 임금 지급일 : 매월 초일부터 말일까지의 임금을 익월 15일 지급</p>
+                  <p className="pl-4 mb-4"> (2) 퇴직연금 부담금 납입일 : 매월 초일부터 말일까지의 임금에 대한 부담금을 익월 25일 납입</p>
+                  <div className="text-left mt-4 border-t border-gray-200 print:border-black pt-4 flex items-center justify-between">
+                    <div>
+                      <span className="mr-2">근로자 :</span>
+                      <span className="inline-block min-w-[60px] text-center font-bold">{formData.empName}</span>
+                    </div>
+                    <span className="text-gray-400 text-sm relative inline-block mr-4">( 서명 또는 인 )
+                      {signatures.sign3 && <img src={signatures.sign3} className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-28 h-auto max-w-none object-contain mix-blend-multiply" alt="서명3"/>}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-12 mb-8 font-bold text-base break-keep leading-relaxed keep-together">
+                근로자 본인은 위 내용을 충분히 숙지하였으며, 그 내용에 동의하며 근로계약서 사본 또는 부본을 교부받았음을 확인합니다.
+              </div>
+
+              <div className="mt-16 text-center keep-together">
+                <div className="text-xl font-bold mb-12 tracking-widest">{formatDate(formData.joinDate)}</div>
+                <div className="px-10 text-lg font-bold">
+                  <div className="text-right mb-8 relative">
+                    <span className="mr-4">("갑")</span> 
+                    <span className="mr-2">{formData.companyName}</span> 
+                    <span className="mr-2">대표이사</span> 
+                    <span className="mr-2">{formData.repName}</span> 
+                    <span className="text-gray-400">(인)</span>
+                    {contractStatus === 'COMPLETED' && sealImages[formData.companyName] && (
+                      <img src={sealImages[formData.companyName]} className="absolute -top-4 -right-8 w-18 h-18 mix-blend-multiply opacity-80" alt="직인" />
+                    )}
+                  </div>
+                  <div className="text-right relative mt-8">
+                    <span className="mr-4 font-bold">("을")</span>
+                    <span className="mr-2">성 명 :</span>
+                    <span className="mr-4 inline-block min-w-[80px] text-center border-b border-black font-bold">{formData.empName}</span>
+                    <span className="text-gray-400 text-sm relative inline-block mr-4">(서명 또는 인)
+                      {signatures.sign4 && <img src={signatures.sign4} className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-28 h-auto max-w-none object-contain mix-blend-multiply" alt="최종서명"/>}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ⭐ 근로자 전송 완료&최종 계약 완료*/}
+        {step === 3 && (contractStatus === 'COMPLETED' || (!isManagerView && contractStatus === 'SIGNED_BY_WORKER')) && (
+            <div className="w-full min-h-screen bg-gray-100 flex flex-col justify-center items-center p-6 z-10 text-center print:hidden">
+                {contractStatus === 'COMPLETED' ? (
+                    <div className="flex flex-col items-center w-full max-w-sm">
+                      <CheckCircle className="w-16 h-16 text-green-500 mb-4"/>
+                      <h2 className="text-2xl font-bold text-gray-800 mb-2">계약 완료</h2>
+                      <p className="text-gray-500 mb-6 break-keep">최종 승인 및 직인 날인이 완료되었습니다.</p>
+                      <button onClick={()=>{const isWebView = /KAKAOTALK|NAVER|Daum|Instagram|Line/i.test(navigator.userAgent);
+                        if (isWebView) { alert("현재 사용 중인 메일 앱 내부에서는 PDF 저장이 차단되어 있습니다.\n다른 브라우저(Safari, Chrome)를 이용해 주세요."); }
+                        window.print();}}
+                        className="w-full px-6 py-4 bg-gray-800 text-white rounded-lg font-bold hover:bg-gray-900 shadow-lg text-lg">
+                          Printer className="inline mr-2"/> PDF 저장
+                      </button>
+                    </div>
+                ) : (
+                    <div className="flex flex-col items-center w-full max-w-sm">
+                        <div className="mb-4 bg-yellow-100 p-4 rounded-full"><Lock className="w-10 h-10 text-yellow-600"/></div>
+                        <h2 className="text-2xl font-bold text-gray-800 mb-2">전송 완료</h2>
+                        <p className="text-gray-500 font-bold mb-2">담당자에게 서명된 계약서가 전달되었습니다.</p>
+                        <p className="text-sm text-gray-400">최종 승인 및 직인 날인이 끝나면 완료 링크를 문자 또는 메일로 보내드립니다.</p>
+                    </div>
+                )}
+            </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+ReactDOM.render(<App />, document.getElementById('root'));
+</script>
+</body>
+</html>
