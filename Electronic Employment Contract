@@ -28,7 +28,7 @@
   }
 
    /* 미리보기 화면 */
-  .main-preview { display: flex; justify-content: center; padding: 20px; box-sizing: border-x: auto; }
+  .main-preview { display: flex; justify-content: center; padding: 20px; box-sizing: border-box; overflow-x: auto; }
   .a4-page { width: 210mm; min-height: 297mm; padding: 15mm; background: white; box-shadow: 0 0 10px rgba(0,0,0,0.1); font-size: 14px; line-height: 1.5; color: black; box-sizing: border-box; flex-shrink: 0; }
   
   /* 공통 테이블 스타일 */
@@ -1026,13 +1026,14 @@
 
                       <div className="pt-2 border-t border-blue-200">
                         <label className="flex items-center gap-2 text-sm font-bold text-gray-800 cursor-pointer w-fit">
-                          <input 
-                            type="checkbox" 
-                            name="isBiweekly" 
-                            checked={formData.isBiweekly || false} 
-                            onChange={e => setFormData({...formData, isBiweekly: e.target.checked})} 
+                          <input
+                            type="checkbox"
+                            name="isBiweekly"
+                            checked={formData.isBiweekly || false}
+                            onChange={e => setFormData({...formData, isBiweekly: e.target.checked})}
                             className="w-4 h-4 text-blue-600"
                           />
+                          격주/교대 근무 등 근로시간 직접 입력
                         </label>
                       </div>
 
@@ -1282,7 +1283,7 @@
                         if (isWebView) { alert("현재 사용 중인 메일 앱 내부에서는 PDF 저장이 차단되어 있습니다.\n다른 브라우저(Safari, Chrome)를 이용해 주세요."); }
                         window.print();}}
                         className="w-full px-6 py-4 bg-gray-800 text-white rounded-lg font-bold hover:bg-gray-900 shadow-lg text-lg">
-                          Printer className="inline mr-2"/> PDF 저장
+                          <Printer className="inline mr-2"/> PDF 저장
                       </button>
                     </div>
                 ) : (
