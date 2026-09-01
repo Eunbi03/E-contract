@@ -226,6 +226,12 @@
               setStep(3); setContractStatus('COMPLETED');
               return alert("이미 최종 완료된 계약서입니다.");
             }
+            if (data === "ALREADY_SUBMITTED") {
+              // ⭐ 이미 서명 제출을 마치고 승인 대기 중인 상태 — 재작성은 막되, "유효하지 않은 링크"가
+              //   아니라 SIGNED_BY_WORKER용 "전송 완료" 화면(아래 step3)을 그대로 보여준다.
+              setStep(3); setContractStatus('SIGNED_BY_WORKER');
+              return;
+            }
             if (data) {
               setFormData({ ...data, empName: data.empName || '', empPhone: data.empPhone || '' });
               setContractStatus(data.status || 'DRAFT');
@@ -263,9 +269,19 @@
           }));
         }
       }
-      if (cfg && cfg.sealImages) setSealImages(cfg.sealImages);
     }).getConfig();
   }, []);
+
+  // ⭐ 직인 이미지는 이제 getConfig()에 포함되지 않는다(모든 방문자에게 5개 법인 것을 다 내려주던
+  //   문제 수정). 계약이 실제로 COMPLETED 상태가 됐을 때(=관리자가 승인/날인한 뒤)만, 그
+  //   법인 것 한 장만 따로 요청한다 — 서명 중인 근로자나 아직 승인 전 상태에서는 아예 요청하지 않는다.
+  useEffect(() => {
+    if (contractStatus === 'COMPLETED' && formData.companyName && !sealImages[formData.companyName] && window.google && window.google.script) {
+      google.script.run.withSuccessHandler(sealDataUrl => {
+        if (sealDataUrl) setSealImages(prev => ({ ...prev, [formData.companyName]: sealDataUrl }));
+      }).getSealImage(formData.companyName);
+    }
+  }, [contractStatus, formData.companyName]);
 
   // 4-4. 주요 헬퍼 함수 (Index.html)
   // ⭐ 입력값 변경 처리 - 관리자 우측 화면
@@ -445,10 +461,16 @@
     if(!confirm("이대로 계약을 최종 승인하고 직인을 날인하시겠습니까?\n근로자에게 완료 메일(PDF 첨부)이 자동 발송됩니다.")) return;
     setLoading(true);
     google.script.run.withSuccessHandler(() => {
-      setLoading(false);
-      justApprovedRef.current = true;
-      setContractStatus('COMPLETED');
-      alert("최종 승인 및 발송이 완료되었습니다.");
+      // ⭐ 이 법인의 직인 이미지를 먼저 받아온 뒤에 COMPLETED로 전환한다. 순서를 반대로 하면
+      //   자동 아카이빙(#print-area 캡처)이 직인 이미지가 도착하기 전 화면을 스냅샷으로
+      //   떠버릴 수 있다.
+      google.script.run.withSuccessHandler(sealDataUrl => {
+        setLoading(false);
+        if (sealDataUrl) setSealImages(prev => ({ ...prev, [formData.companyName]: sealDataUrl }));
+        justApprovedRef.current = true;
+        setContractStatus('COMPLETED');
+        alert("최종 승인 및 발송이 완료되었습니다.");
+      }).getSealImage(formData.companyName);
     }).approveContract({ ...formData, ...signatures, contractId: urlId });
   };
 

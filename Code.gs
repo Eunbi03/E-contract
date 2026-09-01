@@ -83,13 +83,25 @@ function sendBatchContracts(commonData, workerList) {
   });
 
   // ⭐ 첫 묶음은 바로 보내서 관리자가 빠르게 피드백을 받게 하고, 나머지는 큐에 남겨 트리거가 이어받는다.
-  var firstBatch = processSendQueue();
-  return {
-    totalCount: workerList.length,
-    sentNow: firstBatch.sentCount,
-    failNow: firstBatch.failCount,
-    queuedRemaining: Math.max(0, workerList.length - firstBatch.sentCount - firstBatch.failCount)
-  };
+  //   processSendQueue()는 시트 전체에서 가장 오래된 PENDING부터 처리하므로, 아직 안 빠진 이전
+  //   배치가 남아있으면 이번 호출에서 실제로 처리되는 건 "이전 배치"일 수 있다. 그래서 응답은
+  //   processSendQueue()의 결과를 그대로 쓰지 않고, 방금 추가한 이 배치의 id들만 다시 조회해서
+  //   집계한다 — 그래야 배치를 연달아 보내도 안내 문구가 서로 섞이지 않는다.
+  processSendQueue();
+
+  var justAddedIds = {};
+  draftRows.forEach(function (r) { justAddedIds[r[0]] = true; });
+  var freshQueue = queueSheet.getDataRange().getValues();
+  var sentNow = 0, failNow = 0, queuedRemaining = 0;
+  for (var qi = 1; qi < freshQueue.length; qi++) {
+    if (!justAddedIds[freshQueue[qi][0]]) continue;
+    var st = freshQueue[qi][10];
+    if (st === 'SENT') sentNow++;
+    else if (st === 'FAILED') failNow++;
+    else queuedRemaining++;
+  }
+
+  return { totalCount: workerList.length, sentNow: sentNow, failNow: failNow, queuedRemaining: queuedRemaining };
 }
 
 // ⭐ "발송큐" 시트에서 대기 중(PENDING)인 항목을 최대 SEND_CHUNK_SIZE개 꺼내 실제로 발송하고,
@@ -104,28 +116,28 @@ function processSendQueue() {
     var data = sheet.getDataRange().getValues();
     var statusCol = 10; // '상태' 열 (0-based)
 
+    // ⭐ 대기열을 앞에서부터 훑을 때, 이메일 한도가 소진돼 이번 회차에 못 보낼 이메일 건은
+    //   건너뛰고 계속 다음 후보를 찾는다 — 그래야 뒤쪽에 있는 SMS 건(이메일 한도와 무관)이
+    //   앞쪽에 막힌 이메일 건들 때문에 청크 30자리를 다 뺏기고 하루 종일 밀리지 않는다.
+    var quotaExhausted = false;
+    var simQuota = MailApp.getRemainingDailyQuota();
     var pendingRowIndexes = [];
-    for (var i = 1; i < data.length; i++) {
-      if (data[i][statusCol] === 'PENDING') {
-        pendingRowIndexes.push(i);
-        if (pendingRowIndexes.length >= SEND_CHUNK_SIZE) break;
+    for (var i = 1; i < data.length && pendingRowIndexes.length < SEND_CHUNK_SIZE; i++) {
+      if (data[i][statusCol] !== 'PENDING') continue;
+      if (data[i][5] === 'email') {
+        if (simQuota <= 0) { quotaExhausted = true; continue; }
+        simQuota--;
       }
+      pendingRowIndexes.push(i);
     }
 
-    var sentCount = 0, failCount = 0, quotaExhausted = false;
-    var remainingQuota = MailApp.getRemainingDailyQuota();
+    var sentCount = 0, failCount = 0;
 
     for (var k = 0; k < pendingRowIndexes.length; k++) {
       var rowIdx = pendingRowIndexes[k];
       var row = data[rowIdx];
       var name = row[1], email = row[2], phone = row[3], link = row[4], rowMode = row[5],
           companyName = row[6], managerName = row[7], managerPhone = row[8], managerEmail = row[9];
-
-      if (rowMode === 'email' && remainingQuota <= 0) {
-        // 오늘 발송 한도 소진 — 이 행은 PENDING으로 남겨두고 다음 스케줄에서 재시도
-        quotaExhausted = true;
-        continue;
-      }
 
       // ⭐ 서명 요청 메세지 문구 (기존과 동일)
       var messageBody = "안녕하세요. " + name + "님.\n" + companyName + "입니다.\n\n입사를 진심으로 환영 드립니다.\n근로계약 체결을 위해 전자근로계약서를 발송드리오니, 내용을 충분히 검토하신 후 전자서명 진행 부탁드립니다.\n\n문의 사항이 있으면 서명 전 반드시 아래 연락처로 연락 부탁드립니다.\n\n감사합니다.\n\n접속 링크: " + link + "\n접속 비밀번호: 본인 휴대전화번호\n\n담당자: " + (managerName || "") + "\n전화번호: " + (managerPhone || "") + "\n이메일: " + (managerEmail || "");
@@ -139,7 +151,6 @@ function processSendQueue() {
             subject: "[전자계약] " + companyName + " 전자근로계약서 확인 및 서명 요청",
             body: messageBody
           });
-          remainingQuota--;
         } else if (rowMode === 'sms') {
           sendSolapiMessage(phone, managerPhone || '0333400023', messageBody);
         }
@@ -189,6 +200,18 @@ function loadDraftData(id) {
           if (String(parsedData.contractId) === String(id)) return "ALREADY_COMPLETED";
         }
       } catch (e) {}
+    }
+  }
+
+  // ⭐ 근로자가 서명 제출을 이미 마쳤고(승인대기로 이동됨) 아직 관리자 승인 전인 경우.
+  //   이 경우 "계약대기"에는 더 이상 행이 없어 예전에는 null → "유효하지 않은 링크"로 잘못 표시됐다.
+  //   중복 작성을 막는 목적은 그대로 유지하되, 사용자에게는 "이미 제출했고 승인 대기 중"이라고
+  //   정확히 안내하도록 별도 신호값을 반환한다(ALREADY_COMPLETED와 같은 패턴).
+  var pendingApprovalSheet = ss.getSheetByName('승인대기');
+  if (pendingApprovalSheet) {
+    var apData = pendingApprovalSheet.getDataRange().getValues();
+    for (var p = 1; p < apData.length; p++) {
+      if (String(apData[p][0]) === String(id)) return "ALREADY_SUBMITTED";
     }
   }
 
@@ -344,27 +367,29 @@ function approveContract(data) {
 //   담당자 컴퓨터로 동기화되는 Drive 폴더에 자동 보관한다. Index.html의 #print-area outerHTML을
 //   그대로 저장하므로 계약서 문구를 서버 코드에 다시 옮겨 적을 필요가 없고(오타/누락 위험 없음),
 //   근로자가 서명한 화면과 100% 동일한 내용이 보관된다.
+// ⭐ 이 함수는 공유 시트의 행 인덱스를 다루지 않고(고유 id 기준으로 항상 새 파일만 만든다),
+//   Drive 문서 변환은 몇 초씩 걸릴 수 있어 다른 함수들과 같은 전역 락을 여기서 잡으면
+//   그 시간 동안 승인/서명저장/발송 같은 무관한 작업들이 락 대기(30초)로 실패할 수 있다.
+//   그래서 withLock으로 감싸지 않는다.
 function archiveContractHtml(id, html) {
-  return withLock(function () {
-    var folder = getOrCreateArchiveFolder();
-    var safeHtml = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>근로계약서 ' + id + '</title></head><body>' + html + '</body></html>';
-    var htmlBlob = Utilities.newBlob(safeHtml, 'text/html', '근로계약서_' + id + '.html');
-    folder.createFile(htmlBlob);
+  var folder = getOrCreateArchiveFolder();
+  var safeHtml = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>근로계약서 ' + id + '</title></head><body>' + html + '</body></html>';
+  var htmlBlob = Utilities.newBlob(safeHtml, 'text/html', '근로계약서_' + id + '.html');
+  folder.createFile(htmlBlob);
 
-    // PDF 변환은 Apps Script 고급 서비스인 Drive API가 있어야 동작한다(스크립트 편집기 좌측 서비스(+)에서
-    // "Drive API" 추가). 추가돼 있지 않으면 이 블록만 조용히 건너뛰고 위의 HTML 백업은 그대로 남는다.
-    try {
-      var resource = { title: '근로계약서_' + id, mimeType: MimeType.GOOGLE_DOCS };
-      var docFile = Drive.Files.insert(resource, htmlBlob);
-      var doc = DocumentApp.openById(docFile.id);
-      var pdfBlob = doc.getAs('application/pdf').setName('근로계약서_' + id + '.pdf');
-      folder.createFile(pdfBlob);
-      DriveApp.getFileById(docFile.id).setTrashed(true);
-    } catch (e) {
-      Logger.log('PDF 자동 변환 건너뜀(고급 Drive 서비스 미설정 가능성): ' + e);
-    }
-    return 'OK';
-  });
+  // PDF 변환은 Apps Script 고급 서비스인 Drive API가 있어야 동작한다(스크립트 편집기 좌측 서비스(+)에서
+  // "Drive API" 추가). 추가돼 있지 않으면 이 블록만 조용히 건너뛰고 위의 HTML 백업은 그대로 남는다.
+  try {
+    var resource = { title: '근로계약서_' + id, mimeType: MimeType.GOOGLE_DOCS };
+    var docFile = Drive.Files.insert(resource, htmlBlob);
+    var doc = DocumentApp.openById(docFile.id);
+    var pdfBlob = doc.getAs('application/pdf').setName('근로계약서_' + id + '.pdf');
+    folder.createFile(pdfBlob);
+    DriveApp.getFileById(docFile.id).setTrashed(true);
+  } catch (e) {
+    Logger.log('PDF 자동 변환 건너뜀(고급 Drive 서비스 미설정 가능성): ' + e);
+  }
+  return 'OK';
 }
 
 function getOrCreateArchiveFolder() {
@@ -373,12 +398,15 @@ function getOrCreateArchiveFolder() {
   return folders.hasNext() ? folders.next() : DriveApp.createFolder(name);
 }
 
-// ⭐ 프론트엔드(Index.html)가 시작할 때 불러오는 법인 목록 + 직인 이미지.
+// ⭐ 프론트엔드(Index.html)가 시작할 때 불러오는 법인 목록.
 //   회사 정보가 바뀌거나 새 법인이 늘어나도 코드 배포 없이 "회사설정" 시트만 고치면 반영된다.
+//   ※ 직인 이미지는 여기 포함하지 않는다 — getSealImage(companyName)을 따로 두고, 관리자가
+//   최종 승인(직인 날인)한 시점에만 해당 법인 것 한 장만 내려받도록 분리했다. 그래야 아직
+//   서명 중인 근로자를 포함해 이 링크를 여는 모든 사람에게 5개 법인 직인 이미지가 전부
+//   전송되는 걸 막을 수 있다.
 function getConfig() {
   return {
-    companies: getCompanySettings(),
-    sealImages: getSealImages()
+    companies: getCompanySettings()
   };
 }
 
@@ -417,23 +445,26 @@ function getCompanySettings() {
 //   정확히 같은 파일명(예: "(주)케이프라이드.png")으로 이미지를 올려두면 자동으로 매칭된다.
 //   (예전 Seals.html 방식은 회사명 표기가 서로 달라 매칭이 안 되고, Index.html에 포함되지도 않아
 //   직인이 아예 찍히지 않는 상태였다 — 이 방식으로 대체한다.)
-function getSealImages() {
-  var result = {};
+//   getConfig()처럼 전체를 다 내려주지 않고 요청한 법인 한 곳의 이미지만 반환한다 — 관리자가
+//   최종 승인한 뒤에만(Index.html 쪽에서 그 시점에만 호출) 실제로 쓰인다.
+function getSealImage(companyName) {
   var folders = DriveApp.getFoldersByName('전자근로계약_직인');
-  if (!folders.hasNext()) return result;
+  if (!folders.hasNext()) return '';
   var folder = folders.next();
-  var files = folder.getFiles();
-  while (files.hasNext()) {
-    var file = files.next();
-    var name = file.getName().replace(/\.(png|jpg|jpeg)$/i, '');
-    try {
-      var blob = file.getBlob();
-      result[name] = 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes());
-    } catch (e) {
-      Logger.log('직인 이미지 로드 실패(' + name + '): ' + e);
+  var extensions = ['png', 'jpg', 'jpeg'];
+  for (var i = 0; i < extensions.length; i++) {
+    var files = folder.getFilesByName(companyName + '.' + extensions[i]);
+    if (files.hasNext()) {
+      try {
+        var blob = files.next().getBlob();
+        return 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes());
+      } catch (e) {
+        Logger.log('직인 이미지 로드 실패(' + companyName + '): ' + e);
+        return '';
+      }
     }
   }
-  return result;
+  return '';
 }
 
 // ⭐ Solapi API 자격증명 — 코드에 직접 적지 않고 스크립트 속성에서 읽는다.
