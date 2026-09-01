@@ -25,17 +25,32 @@ function withLock(fn) {
   }
 }
 
+// ⭐ 월초/월말처럼 200명 이상을 한 번에 발송하는 경우, 한 번의 실행에서 전부 보내려 하면
+//   ①실행시간 제한(무료 6분/Workspace 30분), ②메일 하루 발송 한도(일반 계정 100통 등)에 걸릴 수 있다.
+//   그래서 시트 기록은 한 번에 몰아서 처리(appendRow 반복 대신 setValues 1회)하고,
+//   실제 발송은 "발송큐" 시트에 쌓아둔 뒤 일부만 즉시 보내고 나머지는 시간 기반 트리거로
+//   몇 분 간격씩 나눠서 이어 보낸다(processSendQueue).
+var SEND_CHUNK_SIZE = 30;               // 한 번에 처리할 인원
+var SEND_CHUNK_INTERVAL_MS = 2 * 60 * 1000;   // 청크 사이 간격(2분)
+var SEND_QUOTA_RETRY_MS = 60 * 60 * 1000;     // 일일 메일 한도 초과 시 재시도 간격(1시간)
+
 // 3-2. sendBatchContracts(commonData, workerList)
 function sendBatchContracts(commonData, workerList) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('계약대기') || ss.insertSheet('계약대기');
+  var draftSheet = ss.getSheetByName('계약대기') || ss.insertSheet('계약대기');
+  if (draftSheet.getLastRow() === 0) draftSheet.appendRow(['ID', '데이터', '발송시간', '대상자이메일', '전화번호']);
 
-  // ⭐ 계약대기 시트 목록
-  if (sheet.getLastRow() === 0) sheet.appendRow(['ID', '데이터', '발송시간', '대상자이메일', '전화번호']);
+  var queueSheet = ss.getSheetByName('발송큐') || ss.insertSheet('발송큐');
+  if (queueSheet.getLastRow() === 0) {
+    queueSheet.appendRow(['ID', '성명', '이메일', '전화번호', '링크', '모드', '법인명', '담당자명', '담당자연락처', '담당자이메일', '상태', '생성시간']);
+  }
 
   var urlBase = ScriptApp.getService().getUrl();
   var mode = commonData.sendMode || 'email';
-  var results = { successCount: 0, failCount: 0 };
+  var nowStr = new Date().toLocaleString();
+
+  var draftRows = [];
+  var queueRows = [];
 
   for (var i = 0; i < workerList.length; i++) {
     var worker = workerList[i];
@@ -44,41 +59,120 @@ function sendBatchContracts(commonData, workerList) {
     individualData.empName = worker.name;
     individualData.workerContactEmail = worker.email;
     individualData.status = 'DRAFT';
-    individualData.sentAt = new Date().toLocaleString();
+    individualData.sentAt = nowStr;
 
     // ⭐ 추측 불가능한 ID 발급 (기존 "법인코드-이름-순번-날짜" 방식은 URL을 쉽게 유추/전수조사할 수 있어 변경)
     var uniqueId = Utilities.getUuid();
-
-    withLock(function () {
-      // ⭐ 계약대기 시트 저장 데이터 설정
-      sheet.appendRow([uniqueId, JSON.stringify(individualData), new Date().toLocaleString(), worker.email, worker.password]);
-    });
+    draftRows.push([uniqueId, JSON.stringify(individualData), nowStr, worker.email, worker.password]);
 
     var link = urlBase + "?id=" + uniqueId;
-
-    // ⭐ 서명 요청 메세지 문구
-    var messageBody = "안녕하세요. " + worker.name + "님.\n" + commonData.companyName + "입니다.\n\n입사를 진심으로 환영 드립니다.\n근로계약 체결을 위해 전자근로계약서를 발송드리오니, 내용을 충분히 검토하신 후 전자서명 진행 부탁드립니다.\n\n문의 사항이 있으면 서명 전 반드시 아래 연락처로 연락 부탁드립니다.\n\n감사합니다.\n\n접속 링크: " + link + "\n접속 비밀번호: 본인 휴대전화번호\n\n담당자: " + (commonData.managerName || "") + "\n전화번호: " + (commonData.managerPhone || "") + "\n이메일: " + (commonData.managerEmail || "");
-
-    // ⭐ 이메일 제목 및 SMS 기본 번호
-    try {
-      if (mode === 'email') {
-        MailApp.sendEmail({
-          to: worker.email,
-          replyTo: commonData.managerEmail,
-          subject: "[전자계약] " + commonData.companyName + " 전자근로계약서 확인 및 서명 요청",
-          body: messageBody
-        });
-      } else if (mode === 'sms') {
-        var senderPhone = commonData.managerPhone || '0333400023';
-        sendSolapiMessage(worker.password, senderPhone, messageBody);
-      }
-      results.successCount++;
-    } catch (e) {
-      Logger.log('발송 실패 (' + worker.name + '): ' + e);
-      results.failCount++;
-    }
+    queueRows.push([
+      uniqueId, worker.name, worker.email || '', worker.password || '', link, mode,
+      commonData.companyName, commonData.managerName || '', commonData.managerPhone || '', commonData.managerEmail || '',
+      'PENDING', nowStr
+    ]);
   }
-  return results;
+
+  withLock(function () {
+    if (draftRows.length) {
+      draftSheet.getRange(draftSheet.getLastRow() + 1, 1, draftRows.length, draftRows[0].length).setValues(draftRows);
+    }
+    if (queueRows.length) {
+      queueSheet.getRange(queueSheet.getLastRow() + 1, 1, queueRows.length, queueRows[0].length).setValues(queueRows);
+    }
+  });
+
+  // ⭐ 첫 묶음은 바로 보내서 관리자가 빠르게 피드백을 받게 하고, 나머지는 큐에 남겨 트리거가 이어받는다.
+  var firstBatch = processSendQueue();
+  return {
+    totalCount: workerList.length,
+    sentNow: firstBatch.sentCount,
+    failNow: firstBatch.failCount,
+    queuedRemaining: Math.max(0, workerList.length - firstBatch.sentCount - firstBatch.failCount)
+  };
+}
+
+// ⭐ "발송큐" 시트에서 대기 중(PENDING)인 항목을 최대 SEND_CHUNK_SIZE개 꺼내 실제로 발송하고,
+//   더 남아있으면 SEND_CHUNK_INTERVAL_MS 뒤에 자기 자신을 다시 호출하는 1회성 트리거를 예약한다.
+//   (Apps Script의 after() 1회성 트리거는 실행되고 나면 자동으로 삭제된다.)
+function processSendQueue() {
+  return withLock(function () {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('발송큐');
+    if (!sheet) return { sentCount: 0, failCount: 0 };
+
+    var data = sheet.getDataRange().getValues();
+    var statusCol = 10; // '상태' 열 (0-based)
+
+    var pendingRowIndexes = [];
+    for (var i = 1; i < data.length; i++) {
+      if (data[i][statusCol] === 'PENDING') {
+        pendingRowIndexes.push(i);
+        if (pendingRowIndexes.length >= SEND_CHUNK_SIZE) break;
+      }
+    }
+
+    var sentCount = 0, failCount = 0, quotaExhausted = false;
+    var remainingQuota = MailApp.getRemainingDailyQuota();
+
+    for (var k = 0; k < pendingRowIndexes.length; k++) {
+      var rowIdx = pendingRowIndexes[k];
+      var row = data[rowIdx];
+      var name = row[1], email = row[2], phone = row[3], link = row[4], rowMode = row[5],
+          companyName = row[6], managerName = row[7], managerPhone = row[8], managerEmail = row[9];
+
+      if (rowMode === 'email' && remainingQuota <= 0) {
+        // 오늘 발송 한도 소진 — 이 행은 PENDING으로 남겨두고 다음 스케줄에서 재시도
+        quotaExhausted = true;
+        continue;
+      }
+
+      // ⭐ 서명 요청 메세지 문구 (기존과 동일)
+      var messageBody = "안녕하세요. " + name + "님.\n" + companyName + "입니다.\n\n입사를 진심으로 환영 드립니다.\n근로계약 체결을 위해 전자근로계약서를 발송드리오니, 내용을 충분히 검토하신 후 전자서명 진행 부탁드립니다.\n\n문의 사항이 있으면 서명 전 반드시 아래 연락처로 연락 부탁드립니다.\n\n감사합니다.\n\n접속 링크: " + link + "\n접속 비밀번호: 본인 휴대전화번호\n\n담당자: " + (managerName || "") + "\n전화번호: " + (managerPhone || "") + "\n이메일: " + (managerEmail || "");
+
+      var newStatus = 'SENT';
+      try {
+        if (rowMode === 'email') {
+          MailApp.sendEmail({
+            to: email,
+            replyTo: managerEmail,
+            subject: "[전자계약] " + companyName + " 전자근로계약서 확인 및 서명 요청",
+            body: messageBody
+          });
+          remainingQuota--;
+        } else if (rowMode === 'sms') {
+          sendSolapiMessage(phone, managerPhone || '0333400023', messageBody);
+        }
+        sentCount++;
+      } catch (e) {
+        Logger.log('발송 실패 (' + name + '): ' + e);
+        newStatus = 'FAILED';
+        failCount++;
+      }
+      data[rowIdx][statusCol] = newStatus;
+      sheet.getRange(rowIdx + 1, statusCol + 1).setValue(newStatus);
+    }
+
+    var stillPending = false;
+    for (var j = 1; j < data.length; j++) {
+      if (data[j][statusCol] === 'PENDING') { stillPending = true; break; }
+    }
+    if (stillPending) {
+      ensureQueueTriggerScheduled(quotaExhausted ? SEND_QUOTA_RETRY_MS : SEND_CHUNK_INTERVAL_MS);
+    }
+
+    return { sentCount: sentCount, failCount: failCount };
+  });
+}
+
+// ⭐ processSendQueue용 1회성 트리거가 이미 예약돼 있으면 중복 예약하지 않는다
+//   (여러 배치를 연달아 보내도 트리거가 쌓이지 않도록).
+function ensureQueueTriggerScheduled(delayMs) {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'processSendQueue') return;
+  }
+  ScriptApp.newTrigger('processSendQueue').timeBased().after(delayMs).create();
 }
 
 // 3-3. loadDraftData(id)
