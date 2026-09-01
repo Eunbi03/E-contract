@@ -1,0 +1,389 @@
+// @ts-nocheck
+
+// ⭐ 3-1. doGet(e)
+function doGet(e) {
+  var template = HtmlService.createTemplateFromFile('Index');
+  template.contractId = (e && e.parameter && e.parameter.id) ? e.parameter.id : "";
+  template.viewMode = (e && e.parameter && e.parameter.mode) ? e.parameter.mode : "";
+  return template.evaluate()
+    .setTitle('전자 근로 계약서')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT)
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+// ※ XFrameOptionsMode를 ALLOWALL → DEFAULT로 변경했습니다. 주민등록번호 등 민감정보를 입력받는 화면이라
+//   다른 사이트가 iframe으로 몰래 감싸 클릭재킹하는 걸 막기 위함입니다. 이 앱을 의도적으로 다른 페이지에
+//   iframe으로 삽입해 쓰고 있었다면 ALLOWALL로 되돌려야 합니다.
+
+// ⭐ 동시 접근 시 시트 행이 꼬이지 않도록 잠그고 실행하는 헬퍼
+function withLock(fn) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 3-2. sendBatchContracts(commonData, workerList)
+function sendBatchContracts(commonData, workerList) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('계약대기') || ss.insertSheet('계약대기');
+
+  // ⭐ 계약대기 시트 목록
+  if (sheet.getLastRow() === 0) sheet.appendRow(['ID', '데이터', '발송시간', '대상자이메일', '전화번호']);
+
+  var urlBase = ScriptApp.getService().getUrl();
+  var mode = commonData.sendMode || 'email';
+  var results = { successCount: 0, failCount: 0 };
+
+  for (var i = 0; i < workerList.length; i++) {
+    var worker = workerList[i];
+    var individualData = JSON.parse(JSON.stringify(commonData));
+    individualData.contractPassword = worker.password;
+    individualData.empName = worker.name;
+    individualData.workerContactEmail = worker.email;
+    individualData.status = 'DRAFT';
+    individualData.sentAt = new Date().toLocaleString();
+
+    // ⭐ 추측 불가능한 ID 발급 (기존 "법인코드-이름-순번-날짜" 방식은 URL을 쉽게 유추/전수조사할 수 있어 변경)
+    var uniqueId = Utilities.getUuid();
+
+    withLock(function () {
+      // ⭐ 계약대기 시트 저장 데이터 설정
+      sheet.appendRow([uniqueId, JSON.stringify(individualData), new Date().toLocaleString(), worker.email, worker.password]);
+    });
+
+    var link = urlBase + "?id=" + uniqueId;
+
+    // ⭐ 서명 요청 메세지 문구
+    var messageBody = "안녕하세요. " + worker.name + "님.\n" + commonData.companyName + "입니다.\n\n입사를 진심으로 환영 드립니다.\n근로계약 체결을 위해 전자근로계약서를 발송드리오니, 내용을 충분히 검토하신 후 전자서명 진행 부탁드립니다.\n\n문의 사항이 있으면 서명 전 반드시 아래 연락처로 연락 부탁드립니다.\n\n감사합니다.\n\n접속 링크: " + link + "\n접속 비밀번호: 본인 휴대전화번호\n\n담당자: " + (commonData.managerName || "") + "\n전화번호: " + (commonData.managerPhone || "") + "\n이메일: " + (commonData.managerEmail || "");
+
+    // ⭐ 이메일 제목 및 SMS 기본 번호
+    try {
+      if (mode === 'email') {
+        MailApp.sendEmail({
+          to: worker.email,
+          replyTo: commonData.managerEmail,
+          subject: "[전자계약] " + commonData.companyName + " 전자근로계약서 확인 및 서명 요청",
+          body: messageBody
+        });
+      } else if (mode === 'sms') {
+        var senderPhone = commonData.managerPhone || '0333400023';
+        sendSolapiMessage(worker.password, senderPhone, messageBody);
+      }
+      results.successCount++;
+    } catch (e) {
+      Logger.log('발송 실패 (' + worker.name + '): ' + e);
+      results.failCount++;
+    }
+  }
+  return results;
+}
+
+// 3-3. loadDraftData(id)
+function loadDraftData(id) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var listSheet = ss.getSheetByName('계약목록');
+  if (listSheet) {
+    var lData = listSheet.getDataRange().getValues();
+    for (var k = 1; k < lData.length; k++) {
+      try {
+        var rowJson = lData[k][10];
+        if (rowJson) {
+          var parsedData = JSON.parse(rowJson);
+          if (String(parsedData.contractId) === String(id)) return "ALREADY_COMPLETED";
+        }
+      } catch (e) {}
+    }
+  }
+
+  var sheet = ss.getSheetByName('계약대기');
+  if (!sheet) return null;
+  var data = sheet.getDataRange().getValues();
+  for (var j = 1; j < data.length; j++) {
+    if (String(data[j][0]) === String(id)) {
+      try {
+        var parsed = JSON.parse(data[j][1]);
+        // ⭐ 본인인증 전에 비밀번호(전화번호)를 클라이언트로 절대 내려보내지 않는다.
+        //   verifyIdentity()가 서버에서만 비교하도록 분리했다.
+        delete parsed.contractPassword;
+        return parsed;
+      } catch (e) {}
+    }
+  }
+  return null;
+}
+
+// ⭐ (근로자) 본인인증 — 비밀번호 비교를 서버에서만 수행하고 결과(boolean)만 반환한다.
+function verifyIdentity(id, inputPassword) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('계약대기');
+  if (!sheet) return false;
+  var data = sheet.getDataRange().getValues();
+  var cleanInput = String(inputPassword || '').replace(/[^0-9]/g, '');
+  if (!cleanInput) return false;
+  for (var j = 1; j < data.length; j++) {
+    if (String(data[j][0]) === String(id)) {
+      try {
+        var parsed = JSON.parse(data[j][1]);
+        var cleanStored = String(parsed.contractPassword || '').replace(/[^0-9]/g, '');
+        return !!cleanStored && cleanInput === cleanStored;
+      } catch (e) {
+        return false;
+      }
+    }
+  }
+  return false;
+}
+
+// 3-4. loadSignedData(id)
+function loadSignedData(id) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var pendingSheet = ss.getSheetByName('승인대기');
+  if (pendingSheet) {
+    var pData = pendingSheet.getDataRange().getValues();
+    for (var i = 1; i < pData.length; i++) {
+      if (String(pData[i][0]) === String(id)) {
+        try { return JSON.parse(pData[i][1]); } catch (e) {}
+      }
+    }
+  }
+
+  var listSheet = ss.getSheetByName('계약목록');
+  if (listSheet) {
+    var lData = listSheet.getDataRange().getValues();
+    for (var j = 1; j < lData.length; j++) {
+      try {
+        var rowJson = lData[j][10];
+        if (rowJson) {
+          var parsedData = JSON.parse(rowJson);
+          if (String(parsedData.contractId) === String(id)) return parsedData;
+        }
+      } catch (e) {}
+    }
+  }
+  return null;
+}
+
+// 3-5. saveContractData(data)
+function saveContractData(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var targetSheet = ss.getSheetByName('승인대기') || ss.insertSheet('승인대기');
+
+  // ⭐ 승인대기 시트 목록
+  if (targetSheet.getLastRow() === 0) targetSheet.appendRow(['ID', '완료데이터(JSON)', '현황', '수신시간', '승인링크']);
+
+  var uniqueId = data.contractId;
+  data.status = 'SIGNED_BY_WORKER';
+  data.workerSignedAt = new Date().toLocaleString();
+  var viewLink = ScriptApp.getService().getUrl() + "?id=" + uniqueId + "&mode=view";
+
+  withLock(function () {
+    // ⭐ 승인대기 시트 저장 데이터 설정
+    targetSheet.appendRow([uniqueId, JSON.stringify(data), 'SIGNED_BY_WORKER', new Date(), viewLink]);
+
+    var pendingSheet = ss.getSheetByName('계약대기');
+    if (pendingSheet) {
+      var rows = pendingSheet.getDataRange().getValues();
+      for (var i = 0; i < rows.length; i++) {
+        if (String(rows[i][0]) === String(uniqueId)) { pendingSheet.deleteRow(i + 1); break; }
+      }
+    }
+  });
+  return "Success";
+}
+
+// 3-6. approveContract(data)
+function approveContract(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  data.status = 'COMPLETED';
+  data.approvedAt = new Date().toLocaleString();
+  var listSheet = ss.getSheetByName('계약목록') || ss.insertSheet('계약목록');
+
+  // ⭐ 계약목록 시트 목록
+  if (listSheet.getLastRow() === 0) {
+    listSheet.appendRow(['법인', '성명', '연락처', '주민등록번호', '주소', '입사일', '문서링크', '발송일시', '제출일시', '완료일시', '데이터(JSON)']);
+  }
+
+  var viewLink = ScriptApp.getService().getUrl() + "?id=" + data.contractId + "&mode=view";
+
+  withLock(function () {
+    // ⭐ 계약목록 시트 저장 데이터 설정
+    listSheet.appendRow([
+      data.companyName, data.empName, data.empPhone, data.empRegNumber, data.empAddress,
+      data.joinDate, viewLink, data.sentAt || "", data.workerSignedAt || "", data.approvedAt, JSON.stringify(data)
+    ]);
+
+    var pendingSheet = ss.getSheetByName('승인대기');
+    if (pendingSheet) {
+      var rows = pendingSheet.getDataRange().getValues();
+      for (var i = 1; i < rows.length; i++) {
+        if (String(rows[i][0]) === String(data.contractId)) { pendingSheet.deleteRow(i + 1); break; }
+      }
+    }
+  });
+
+  var todayObj = new Date();
+  var expireDate = new Date(todayObj);
+  expireDate.setMonth(expireDate.getMonth() + 3);
+  var expireDateStr = Utilities.formatDate(expireDate, "Asia/Seoul", "yyyy년 MM월 dd일");
+
+  // ⭐ 계약 완료 메세지 문구
+  if (data.workerContactEmail) {
+    MailApp.sendEmail({
+      to: data.workerContactEmail,
+      subject: "[계약완료] " + data.companyName + " 근로계약서 체결 완료 및 다운로드 안내",
+      body: "안녕하세요. " + data.empName + "님.\n\n" +
+        "전자근로계약이 최종 승인되어 체결이 완료되었습니다.\n" +
+        "아래 링크로 접속하신 후, 화면의 [인쇄 및 PDF 저장] 버튼을 눌러 최종 계약서를 다운로드하여 보관해 주시기 바랍니다.\n\n" +
+        "▶ 최종 계약서 확인 및 PDF 다운로드 링크:" + viewLink + "\n" +
+        "▶ 다운로드 가능 기간: ~ " + expireDateStr + "\n\n" +
+        "담당자: " + (data.managerName || "") + "\n전화번호: " + (data.managerPhone || "") + "\n이메일: " + (data.managerEmail || "") + "\n\n" +
+        "감사합니다."
+    });
+  }
+  return "Approved";
+}
+
+// ⭐ 관리자가 최종 승인한 직후, 화면에 렌더링된 계약서(직인 포함) 그대로를 넘겨받아
+//   담당자 컴퓨터로 동기화되는 Drive 폴더에 자동 보관한다. Index.html의 #print-area outerHTML을
+//   그대로 저장하므로 계약서 문구를 서버 코드에 다시 옮겨 적을 필요가 없고(오타/누락 위험 없음),
+//   근로자가 서명한 화면과 100% 동일한 내용이 보관된다.
+function archiveContractHtml(id, html) {
+  return withLock(function () {
+    var folder = getOrCreateArchiveFolder();
+    var safeHtml = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>근로계약서 ' + id + '</title></head><body>' + html + '</body></html>';
+    var htmlBlob = Utilities.newBlob(safeHtml, 'text/html', '근로계약서_' + id + '.html');
+    folder.createFile(htmlBlob);
+
+    // PDF 변환은 Apps Script 고급 서비스인 Drive API가 있어야 동작한다(스크립트 편집기 좌측 서비스(+)에서
+    // "Drive API" 추가). 추가돼 있지 않으면 이 블록만 조용히 건너뛰고 위의 HTML 백업은 그대로 남는다.
+    try {
+      var resource = { title: '근로계약서_' + id, mimeType: MimeType.GOOGLE_DOCS };
+      var docFile = Drive.Files.insert(resource, htmlBlob);
+      var doc = DocumentApp.openById(docFile.id);
+      var pdfBlob = doc.getAs('application/pdf').setName('근로계약서_' + id + '.pdf');
+      folder.createFile(pdfBlob);
+      DriveApp.getFileById(docFile.id).setTrashed(true);
+    } catch (e) {
+      Logger.log('PDF 자동 변환 건너뜀(고급 Drive 서비스 미설정 가능성): ' + e);
+    }
+    return 'OK';
+  });
+}
+
+function getOrCreateArchiveFolder() {
+  var name = '전자근로계약_완료보관함';
+  var folders = DriveApp.getFoldersByName(name);
+  return folders.hasNext() ? folders.next() : DriveApp.createFolder(name);
+}
+
+// ⭐ 프론트엔드(Index.html)가 시작할 때 불러오는 법인 목록 + 직인 이미지.
+//   회사 정보가 바뀌거나 새 법인이 늘어나도 코드 배포 없이 "회사설정" 시트만 고치면 반영된다.
+function getConfig() {
+  return {
+    companies: getCompanySettings(),
+    sealImages: getSealImages()
+  };
+}
+
+function getCompanySettings() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('회사설정');
+
+  // ⭐ 시트가 없으면 기존에 코드에 하드코딩돼 있던 값 그대로 최초 1회 생성해준다.
+  if (!sheet) {
+    sheet = ss.insertSheet('회사설정');
+    sheet.appendRow(['법인명', '주소', '전화번호', '대표자', '담당자명', '담당자연락처', '담당자이메일']);
+    var defaults = [
+      ['(주)케이프라이드', '강원도 횡성군 우천면 우천제2농공단지로 65-50', 'T. 033-644-4467 F.033-644-1944', '김도영', '송문주', '033-340-0023', 'kpride@example.com'],
+      ['㈜케이펙', '강원도 강릉시 정원로 54, 8층(교동, 주니어타운)', 'T. 033-644-4467 F.033-644-1944', '김도영', '하주연', '033-340-0012', 'kpride@example.com'],
+      ['백두대간영농조합법인', '강원도 강릉시 정원로 54, 8층(교동, 주니어타운)', 'T. 033-644-4467 F.033-644-1944', '김도영', '서영민', '033-340-0021', 'kpride@example.com'],
+      ['㈜보담', '강원도 원주시 저금어지길 456(가현동 강원LPC 2층)', 'T. 033-644-4467 F.033-644-1944', '이승수', '이선우', '033-340-0020', 'kpride@example.com'],
+      ['(주)마시타', '강원도 강릉시 정원로 54, 8층(교통, 주니어타운)', 'T. 033-644-4467 F.033-644-1944', '김주원', '송문주', '033-340-0023', 'kpride@example.com']
+    ];
+    defaults.forEach(function (row) { sheet.appendRow(row); });
+  }
+
+  var data = sheet.getDataRange().getValues();
+  var list = [];
+  for (var i = 1; i < data.length; i++) {
+    var r = data[i];
+    if (!r[0]) continue;
+    list.push({
+      name: r[0], address: r[1], phone: r[2], rep: r[3],
+      managerName: r[4], managerPhone: r[5], managerEmail: r[6]
+    });
+  }
+  return list;
+}
+
+// ⭐ 직인 이미지: Drive에 "전자근로계약_직인" 폴더를 만들고, 그 안에 "회사설정" 시트의 법인명과
+//   정확히 같은 파일명(예: "(주)케이프라이드.png")으로 이미지를 올려두면 자동으로 매칭된다.
+//   (예전 Seals.html 방식은 회사명 표기가 서로 달라 매칭이 안 되고, Index.html에 포함되지도 않아
+//   직인이 아예 찍히지 않는 상태였다 — 이 방식으로 대체한다.)
+function getSealImages() {
+  var result = {};
+  var folders = DriveApp.getFoldersByName('전자근로계약_직인');
+  if (!folders.hasNext()) return result;
+  var folder = folders.next();
+  var files = folder.getFiles();
+  while (files.hasNext()) {
+    var file = files.next();
+    var name = file.getName().replace(/\.(png|jpg|jpeg)$/i, '');
+    try {
+      var blob = file.getBlob();
+      result[name] = 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes());
+    } catch (e) {
+      Logger.log('직인 이미지 로드 실패(' + name + '): ' + e);
+    }
+  }
+  return result;
+}
+
+// ⭐ Solapi API 자격증명 — 코드에 직접 적지 않고 스크립트 속성에서 읽는다.
+//   설정 방법: Apps Script 편집기 > 프로젝트 설정(톱니바퀴) > 스크립트 속성에서
+//   SOLAPI_API_KEY, SOLAPI_API_SECRET 값을 등록해두면 된다.
+function getSolapiCredentials() {
+  var props = PropertiesService.getScriptProperties();
+  return {
+    apiKey: props.getProperty('SOLAPI_API_KEY'),
+    apiSecret: props.getProperty('SOLAPI_API_SECRET')
+  };
+}
+
+function sendSolapiMessage(to, from, text) {
+  var creds = getSolapiCredentials();
+  if (!creds.apiKey || !creds.apiSecret) {
+    Logger.log('Solapi 자격증명이 스크립트 속성에 설정되어 있지 않습니다.');
+    return null;
+  }
+
+  const url = "https://api.solapi.com/messages/v4/send-many/detail";
+
+  // 인증 헤더 생성
+  const date = new Date().toISOString();
+  const salt = Math.random().toString(36).substring(2, 15);
+  const hmacData = date + salt;
+  const signature = Utilities.computeHmacSha256Signature(hmacData, creds.apiSecret)
+    .map(function (chr) { return (chr + 256).toString(16).slice(-2) }).join('');
+
+  const headers = {
+    "Authorization": `HMAC-SHA256 apiKey=${creds.apiKey}, date=${date}, salt=${salt}, signature=${signature}`,
+    "Content-Type": "application/json"
+  };
+
+  const payload = { "messages": [{ "to": to.replace(/-/g, ""), "from": from.replace(/-/g, ""), "text": text }] };
+
+  const options = { "method": "post", "headers": headers, "payload": JSON.stringify(payload), "muteHttpExceptions": true };
+
+  try {
+    const response = UrlFetchApp.fetch(url, options);
+    Logger.log("Solapi Response: " + response.getContentText());
+    return JSON.parse(response.getContentText());
+  } catch (e) {
+    Logger.log("Solapi Error: " + e.toString());
+    return null;
+  }
+}

@@ -78,9 +78,6 @@
 
   const App = () => {
 
-   // 직인 이미지 불러오기
-   const sealImages = window.sealImages || {};
-
   // 4-4. 주요 헬퍼 함수 (Index.html)
   // ⭐ 전화번호 하이픈 처리
   const autoHyphenPhone = (str) => {
@@ -105,20 +102,23 @@
     return clean.replace(/(\d{6})(\d{1,7})/, '$1-$2').slice(0, 14);
   };
 
-  // ⭐ 법인별 정보
-  const companies = [ 
+  // ⭐ 법인별 정보 (서버 설정(회사설정 시트)을 못 불러왔을 때 쓰는 기본값 — 최초 렌더링이 비어보이지 않도록 유지)
+  const DEFAULT_COMPANIES = [
     { name: '(주)케이프라이드', address: '강원도 횡성군 우천면 우천제2농공단지로 65-50', phone: 'T. 033-644-4467 F.033-644-1944', rep: '김도영', managerPhone: '033-340-0023', managerEmail: 'kpride@example.com', managerName: '송문주'},
     { name: '㈜케이펙', address: '강원도 강릉시 정원로 54, 8층(교동, 주니어타운)', phone: 'T. 033-644-4467 F.033-644-1944', rep: '김도영', managerPhone: '033-340-0012', managerEmail: 'kpride@example.com', managerName: '하주연' },
     { name: '백두대간영농조합법인', address: '강원도 강릉시 정원로 54, 8층(교동, 주니어타운)', phone: 'T. 033-644-4467 F.033-644-1944', rep: '김도영', managerPhone: '033-340-0021', managerEmail: 'kpride@example.com', managerName: '서영민' },
     { name: '㈜보담', address: '강원도 원주시 저금어지길 456(가현동 강원LPC 2층)', phone: 'T. 033-644-4467 F.033-644-1944', rep: '이승수', managerPhone: '033-340-0020', managerEmail: 'kpride@example.com', managerName: '이선우' },
     { name: '(주)마시타', address: '강원도 강릉시 정원로 54, 8층(교통, 주니어타운)', phone: 'T. 033-644-4467 F.033-644-1944', rep: '김주원', managerPhone: '033-340-0023', managerEmail: 'kpride@example.com', managerName: '송문주'}
   ];
+  // ⭐ 법인 목록/직인 이미지는 이제 서버(회사설정 시트, 직인 Drive 폴더)에서 불러온다 — 회사 추가/수정 시 코드 배포 없이 시트만 고치면 됨
+  const [companies, setCompanies] = useState(DEFAULT_COMPANIES);
+  const [sealImages, setSealImages] = useState({});
 
-  // 4-2. formData — 계약서 핵심 데이터 (Index.html) 
+  // 4-2. formData — 계약서 핵심 데이터 (Index.html)
   // ⭐ 계약서 초기 정보값 설정
   const [formData, setFormData] = useState({
     companyName: '(주)케이프라이드', companyAddress: '강원도 횡성군 우천면 우천제2농공단지로 65-50', companyPhone: 'T.033-644-4467 F.033-644-1944', repName: '김도영', managerPhone: '033-340-0023', managerEmail: 'kpride@example.com', managerName: '송문주',
-    contractPassword: '', empName: '', empRegNumber: '', empAddress: '', empPhone: '',
+    empName: '', empRegNumber: '', empAddress: '', empPhone: '',
     joinDate: new Date().toISOString().split('T')[0], contractType: 'regular', startDate: new Date().toISOString().split('T')[0], 
     contractMonths: '', endDate: '', 
     useProbation: false, probationStartDate: new Date().toISOString().split('T')[0], probationEndDate: '', probationMonths: '3', probationSalary: '',
@@ -141,6 +141,7 @@
   const [contractStatus, setContractStatus] = useState('DRAFT'); 
   const [urlId, setUrlId] = useState(null);
   const canvasRef = useRef(null);
+  const justApprovedRef = useRef(false);
   const [isDrawing, setIsDrawing] = useState(false);
   const [isInvalidLink, setIsInvalidLink] = useState(false);
 
@@ -226,7 +227,7 @@
               return alert("이미 최종 완료된 계약서입니다.");
             }
             if (data) {
-              setFormData({ ...data, empName: data.empName || '', empPhone: data.empPhone || data.contractPassword || '' });
+              setFormData({ ...data, empName: data.empName || '', empPhone: data.empPhone || '' });
               setContractStatus(data.status || 'DRAFT');
               if (data.status === 'SIGNED_BY_WORKER') {
                 setSignatures({ sign1: data.sign1, sign2: data.sign2, sign3: data.sign3, sign4: data.sign4 });
@@ -242,6 +243,28 @@
         }
       } else { clearTimeout(timeoutId); setLoading(false); }
     }
+  }, []);
+
+  // ⭐ 법인 목록/직인 이미지를 서버(회사설정 시트, 직인 Drive 폴더)에서 불러오기
+  // 새 계약서를 처음 작성하는 경우(id 없음)에는 목록의 첫 번째 법인으로 기본값도 맞춰준다.
+  useEffect(() => {
+    if (!(window.google && window.google.script)) return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const hasId = !!urlParams.get('id');
+    google.script.run.withSuccessHandler(cfg => {
+      if (cfg && cfg.companies && cfg.companies.length) {
+        setCompanies(cfg.companies);
+        if (!hasId) {
+          const first = cfg.companies[0];
+          setFormData(prev => ({
+            ...prev,
+            companyName: first.name, companyAddress: first.address, companyPhone: first.phone,
+            repName: first.rep, managerPhone: first.managerPhone, managerEmail: first.managerEmail, managerName: first.managerName
+          }));
+        }
+      }
+      if (cfg && cfg.sealImages) setSealImages(cfg.sealImages);
+    }).getConfig();
   }, []);
 
   // 4-4. 주요 헬퍼 함수 (Index.html)
@@ -313,10 +336,13 @@
   // 4-4. 주요 헬퍼 함수 (Index.html)
   // ⭐ (근로자)본인인증 확인
   const checkPw = () => {
-    const cleanInput = verificationInput.replace(/[^0-9]/g, '');
-    const cleanStored = formData.contractPassword.replace(/[^0-9]/g, '');
-    if (cleanInput === cleanStored) { setIsIdentityVerified(true); } 
-    else alert("비밀번호 불일치");
+    if (!verificationInput.trim()) return alert("비밀번호(전화번호)를 입력해 주세요.");
+    setLoading(true);
+    google.script.run.withSuccessHandler(ok => {
+      setLoading(false);
+      if (ok) setIsIdentityVerified(true);
+      else alert("비밀번호 불일치");
+    }).verifyIdentity(urlId, verificationInput);
   };
 
   // 4-4. 주요 헬퍼 함수 (Index.html)
@@ -414,10 +440,30 @@
     setLoading(true);
     google.script.run.withSuccessHandler(() => {
       setLoading(false);
+      justApprovedRef.current = true;
       setContractStatus('COMPLETED');
       alert("최종 승인 및 발송이 완료되었습니다.");
     }).approveContract({ ...formData, ...signatures, contractId: urlId });
   };
+
+  // ⭐ 승인 직후(직인이 찍힌 최종본이 렌더링된 시점) 화면에 보이는 계약서 그대로를 서버로 보내
+  // Drive에 자동 백업한다. 이미 완료된 계약서를 나중에 다시 열람할 때는(재승인이 아니므로) 반복 저장하지 않는다.
+  useEffect(() => {
+    if (contractStatus === 'COMPLETED' && justApprovedRef.current) {
+      justApprovedRef.current = false;
+      const el = document.getElementById('print-area');
+      if (el && urlId) {
+        // 화면 표시 전환용 클래스(hidden)만 제거한 사본을 만들고, 현재 적용 중인 스타일(Tailwind CDN이
+        // 생성한 것 포함)을 그대로 함께 담아 보내 표/테두리 등 서식이 보관본에도 그대로 남게 한다.
+        const clone = el.cloneNode(true);
+        clone.classList.remove('hidden');
+        const styles = Array.from(document.querySelectorAll('style')).map(s => s.outerHTML).join('');
+        google.script.run
+          .withFailureHandler(err => console.error('계약서 자동 저장 실패:', err))
+          .archiveContractHtml(urlId, styles + clone.outerHTML);
+      }
+    }
+  }, [contractStatus]);
 
   // ⭐ 발송 최대 인원
   const addWorker = () => { 
