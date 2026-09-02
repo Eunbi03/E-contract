@@ -186,101 +186,82 @@ function ensureQueueTriggerScheduled(delayMs) {
   ScriptApp.newTrigger('processSendQueue').timeBased().after(delayMs).create();
 }
 
-// 3-3. loadDraftData(id)
-function loadDraftData(id) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var listSheet = ss.getSheetByName('계약목록');
-  if (listSheet) {
-    var lData = listSheet.getDataRange().getValues();
-    for (var k = 1; k < lData.length; k++) {
-      try {
-        var rowJson = lData[k][10];
-        if (rowJson) {
-          var parsedData = JSON.parse(rowJson);
-          if (String(parsedData.contractId) === String(id)) return "ALREADY_COMPLETED";
-        }
-      } catch (e) {}
-    }
-  }
-
-  // ⭐ 근로자가 서명 제출을 이미 마쳤고(승인대기로 이동됨) 아직 관리자 승인 전인 경우.
-  //   이 경우 "계약대기"에는 더 이상 행이 없어 예전에는 null → "유효하지 않은 링크"로 잘못 표시됐다.
-  //   중복 작성을 막는 목적은 그대로 유지하되, 사용자에게는 "이미 제출했고 승인 대기 중"이라고
-  //   정확히 안내하도록 별도 신호값을 반환한다(ALREADY_COMPLETED와 같은 패턴).
-  var pendingApprovalSheet = ss.getSheetByName('승인대기');
-  if (pendingApprovalSheet) {
-    var apData = pendingApprovalSheet.getDataRange().getValues();
-    for (var p = 1; p < apData.length; p++) {
-      if (String(apData[p][0]) === String(id)) return "ALREADY_SUBMITTED";
-    }
-  }
-
-  var sheet = ss.getSheetByName('계약대기');
+// ⭐ 계약대기/승인대기 시트처럼 A열에 id가 그대로 들어있는 경우 공용으로 쓰는 조회 헬퍼.
+//   (loadDraftData/loadSignedData/verifyIdentity가 각자 따로 구현하던 반복문을 여기로 모았다 —
+//   예전에는 이 세 곳 중 한 곳만 고치고 나머지를 놓쳐서 "서명 제출 후 재접속 시 링크 오류"
+//   같은 버그가 생겼었다.)
+function findRowById(sheet, id, idCol) {
   if (!sheet) return null;
   var data = sheet.getDataRange().getValues();
-  for (var j = 1; j < data.length; j++) {
-    if (String(data[j][0]) === String(id)) {
-      try {
-        var parsed = JSON.parse(data[j][1]);
-        // ⭐ 본인인증 전에 비밀번호(전화번호)를 클라이언트로 절대 내려보내지 않는다.
-        //   verifyIdentity()가 서버에서만 비교하도록 분리했다.
-        delete parsed.contractPassword;
-        return parsed;
-      } catch (e) {}
-    }
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idCol]) === String(id)) return data[i];
   }
   return null;
 }
 
+// ⭐ 계약목록 시트는 id가 별도 열이 아니라 J열(인덱스 10) JSON 데이터 안 contractId 필드에
+//   들어있어 findRowById와는 다른 방식으로 찾아야 한다.
+function findContractIdInList(listSheet, id) {
+  if (!listSheet) return null;
+  var data = listSheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    try {
+      var parsed = JSON.parse(data[i][10]);
+      if (String(parsed.contractId) === String(id)) return parsed;
+    } catch (e) {}
+  }
+  return null;
+}
+
+// 3-3. loadDraftData(id)
+function loadDraftData(id) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  if (findContractIdInList(ss.getSheetByName('계약목록'), id)) return "ALREADY_COMPLETED";
+
+  // ⭐ 근로자가 서명 제출을 이미 마쳤고(승인대기로 이동됨) 아직 관리자 승인 전인 경우.
+  //   중복 작성을 막는 목적은 유지하되, "유효하지 않은 링크"가 아니라 "이미 제출했고 승인
+  //   대기 중"이라고 정확히 안내하도록 별도 신호값을 반환한다(ALREADY_COMPLETED와 같은 패턴).
+  if (findRowById(ss.getSheetByName('승인대기'), id, 0)) return "ALREADY_SUBMITTED";
+
+  var row = findRowById(ss.getSheetByName('계약대기'), id, 0);
+  if (!row) return null;
+  try {
+    var parsed = JSON.parse(row[1]);
+    // ⭐ 본인인증 전에 비밀번호(전화번호)를 클라이언트로 절대 내려보내지 않는다.
+    //   verifyIdentity()가 서버에서만 비교하도록 분리했다.
+    delete parsed.contractPassword;
+    return parsed;
+  } catch (e) {
+    return null;
+  }
+}
+
 // ⭐ (근로자) 본인인증 — 비밀번호 비교를 서버에서만 수행하고 결과(boolean)만 반환한다.
 function verifyIdentity(id, inputPassword) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('계약대기');
-  if (!sheet) return false;
-  var data = sheet.getDataRange().getValues();
   var cleanInput = String(inputPassword || '').replace(/[^0-9]/g, '');
   if (!cleanInput) return false;
-  for (var j = 1; j < data.length; j++) {
-    if (String(data[j][0]) === String(id)) {
-      try {
-        var parsed = JSON.parse(data[j][1]);
-        var cleanStored = String(parsed.contractPassword || '').replace(/[^0-9]/g, '');
-        return !!cleanStored && cleanInput === cleanStored;
-      } catch (e) {
-        return false;
-      }
-    }
+  var row = findRowById(SpreadsheetApp.getActiveSpreadsheet().getSheetByName('계약대기'), id, 0);
+  if (!row) return false;
+  try {
+    var parsed = JSON.parse(row[1]);
+    var cleanStored = String(parsed.contractPassword || '').replace(/[^0-9]/g, '');
+    return !!cleanStored && cleanInput === cleanStored;
+  } catch (e) {
+    return false;
   }
-  return false;
 }
 
 // 3-4. loadSignedData(id)
 function loadSignedData(id) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var pendingSheet = ss.getSheetByName('승인대기');
-  if (pendingSheet) {
-    var pData = pendingSheet.getDataRange().getValues();
-    for (var i = 1; i < pData.length; i++) {
-      if (String(pData[i][0]) === String(id)) {
-        try { return JSON.parse(pData[i][1]); } catch (e) {}
-      }
-    }
+
+  var row = findRowById(ss.getSheetByName('승인대기'), id, 0);
+  if (row) {
+    try { return JSON.parse(row[1]); } catch (e) {}
   }
 
-  var listSheet = ss.getSheetByName('계약목록');
-  if (listSheet) {
-    var lData = listSheet.getDataRange().getValues();
-    for (var j = 1; j < lData.length; j++) {
-      try {
-        var rowJson = lData[j][10];
-        if (rowJson) {
-          var parsedData = JSON.parse(rowJson);
-          if (String(parsedData.contractId) === String(id)) return parsedData;
-        }
-      } catch (e) {}
-    }
-  }
-  return null;
+  return findContractIdInList(ss.getSheetByName('계약목록'), id);
 }
 
 // 3-5. saveContractData(data)
