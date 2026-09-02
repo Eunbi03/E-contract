@@ -76,6 +76,91 @@
   const Eraser = ({ className }) => <IconBase className={className}><path d="M2.9 15.8a1 1 0 0 0-.9 1.2l2.5 9A1 1 0 0 0 5.6 27h12.8a1 1 0 0 0 1-1l2.5-9a1 1 0 0 0-.9-1.2c-1.1-.3-2.3-.5-3.5-.5s-2.4.2-3.5.5c-1.1.3-2.3.5-3.5.5s-2.4-.2-3.5-.5z" transform="translate(-2 -2) scale(0.9)"/></IconBase>;
   const ChevronRight = ({ className }) => <IconBase className={className}><polyline points="9 18 15 12 9 6"></polyline></IconBase>;
 
+  // ⭐ 제1조~제11조 본문 — 예전에는 workerStep===10(근로자 최종 확인 화면)과 최종 미리보기/인쇄
+  //   화면에 이 조항 전체가 거의 그대로 두 번 복붙돼 있었다(코드리뷰 지적사항). 문구를 손으로
+  //   옮겨 적을 때 실제로 두 군데 사이에 미세한 표기 차이가 이미 생겨 있었는데(아래 참고),
+  //   이제 이 컴포넌트 하나로 합쳐서 앞으로는 문구를 고칠 곳이 한 곳뿐이도록 정리했다.
+  //   래퍼(줄간격 등 CSS)만 호출하는 쪽에서 이전과 동일하게 유지하도록 className을 그대로 받는다.
+  //   ※ 실제 문구 자체는 바꾸지 않았고, 두 사본 사이에 이미 있던 아래 두 군데의 사소한 불일치만
+  //   이 파일 다른 곳(예: workerStep===2의 세 번째 사본)과 같은 쪽으로 맞췄다:
+  //   - "1개월 단위기간" (최종 미리보기에만 "단위 기간"으로 띄어져 있던 것)
+  //   - 수습 3항의 "채용일로부터 {개월}개월간" (최종 미리보기에만 괄호가 붙어 있던 것)
+  const ContractArticles = ({ formData, className }) => (
+    <div className={className}>
+      <div className="keep-together"><strong>제1조(목적)</strong><br/>본 근로계약서는 "갑"과 "을"이 근로계약을 체결함에 있어 임금, 근로시간 등 근로조건을 정하는 것을 목적으로 한다.</div>
+      <div className="keep-together"><strong>제2조(근로계약기간)</strong>
+        <table className="c-table mt-1 text-sm">
+          <tbody>
+            <tr><td className="pl-2 w-24 bg-gray-label">{formData.contractType === 'regular' ? '■' : '□'} 정규직</td><td className="pl-2">"갑"은 "을"을 기간의 정함이 없는 근로자로서 정년 시까지 고용을 보장한다. <br/>({formatDate(formData.startDate)} ~ 정년 시까지 고용 보장)</td></tr>
+            <tr><td className="pl-2 bg-gray-label">{formData.contractType === 'contract' ? '■' : '□'} 계약직</td><td className="pl-2">{formatDate(formData.startDate)} ~ {formatDate(formData.endDate)} <span className="ml-2">({formData.contractMonths === 'direct' ? '별도협의' : formData.contractMonths + ' 개월'})</span></td></tr>
+            <tr><td className="pl-2 bg-gray-label">{formData.useProbation ? '■' : '□'} 수습기간</td><td className="pl-2">1. 채용일로부터 {formData.probationMonths}개월간 1개월 단위기간으로 종료되는 수습및시용 기간으로 한다. 해당기간 동안 업무적격여부 판단에 따라 수습및시용 기간 중이라도 계약의 해지 또는 본채용을 거부할 수 있다.<br/>2. 업무적격여부 판단기준은 수습평가서에 의해 결정 한다.<br/>3. 본인은 '갑'의 관련규정에 의거 채용일로부터 {formData.probationMonths}개월간 수습및시용 근로자로서 임금을 하향하여 지급받음에 이의를 제기하지 아니한다.<br/>(기간: {formData.useProbation ? formatDate(formData.probationStartDate) + " ~ " + formatDate(formData.probationEndDate) : "      년      월      일 ~      년      월      일까지"} / 월 {formData.probationSalary || '별도 정함'}원)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div className="keep-together"><strong>제3조(근무장소)</strong><br/>"을"의 근무 장소는 {formData.workPlace}(으)로 한다. 다만 "갑"은 인사명령에 의거 "을"의 근무 장소를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.</div>
+      <div className="keep-together"><strong>제4조(담당업무)</strong><br/>"을"의 담당업무는 {formData.duties}(으)로 한다. 다만, "갑"은 인사명령에 의거 "을"의 담당업무를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.</div>
+      <div className="keep-together"><strong>제5조(임금)</strong><br/>(1) 임금형태 : "갑"과 "을"은 월급제로 임금계약을 체결한다. (기본급과 법정 제수당이 포함된 "포괄임금")<br/>(2) 임금내용 : 월급총액, 월급의 구성내역, 지급방법 등은 임금계약서에 의한다.<br/>(3) 사정변경 : "갑"은 계약기간 중 제반 경영여건상 처우조건이 불가피하거나, 인사상 처우조정 사유발생시에는 제반기준에 의거 임금을 조정할 수 있다.<br/>(4) 임금인상 : "갑"과 "을"은 근로계약기간이 종료되는 시점에서 업무상 필요성, "갑"의 경영사정에 의거 재계약을 체결할 시 상호 대등한 입장으로 임금인상 등을 협의할 수 있다. 다만 임금내용의 변동이 없는 경우, 또는 임금인상에 대한 합의가 성립 되지 않는 경우 이전과 동일한 금액으로 반복하여 체결하며 "을"은 이에 이의를 제기하지 않는다.<br/>(5) 임금산정일 및 지급일자 : 초일부터 말일까지 계산하여 익월 10일에 지급한다. (단 공휴일일경우에는 그 다음 영업일에 지급한다.)<br/>(6) 비밀유지 : 임금은 회사의 규정과 상사의 지시에 따른 본인의 근로제공에 대한 모든 금전적 보상임을 확인하며 직원상호간 비밀의무를 반드시 준수한다.</div>
+
+      <div className="keep-together"><strong>제6조(근로시간 및 휴게시간)</strong><br/>
+        (1) "을"의 1주간, 1일의 소정근로시간, 휴게시간은 다음표와 같다. 단, 휴일은 회사 사정에 따라 근무할 수있고, 근로자는 정당한 사유없이 거부할 수 없다.<br/>
+        <table className="c-table mt-2 mb-2 text-center table-fixed text-sm">
+          <colgroup>
+            <col className="w-[20%]"/>
+            <col className="w-[48%]"/>
+            <col className="w-[32%]"/>
+          </colgroup>
+          <thead>
+            <tr>
+              <td className="bg-gray-label">1 주간</td>
+              <td className="bg-gray-label">근로시간(시업시각, 종업시각 등)</td>
+              <td className="bg-gray-label">휴게시간</td>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              {formData.isBiweekly ? (
+                <>
+                  <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleWeek}</td>
+                  <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleWork}</td>
+                  <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleBreak}</td>
+                </>
+              ) : (
+                <>
+                  <td className="text-center">{formData.weeklyWorkHours}시간</td>
+                  <td className="text-center">
+                    1일 {formData.dailyWorkHours}시간
+                    {formData.weeklyWorkDays !== '5' && ` 주 ${formData.weeklyWorkDays}일`}
+                    <br/>[ 시업 {formData.startTime} ~ 종업 {formData.endTime} ]
+                  </td>
+                  <td className="text-center">{formData.breakTimeMinutes}분 <br/>[ {formData.breakTimeStart}~{formData.breakTimeEnd} ]</td>
+                </>
+              )}
+            </tr>
+          </tbody>
+        </table>
+        * 업무상황 및 근무 여건에 따라 근로 시간 및 휴게시간은 조정 및 변경 될수 있다.<br/>
+        * 업무상황 및 경영사정에 따라 근무일은 교대제로 운영할 수 있다.<br/><br/>
+        (2) 시간외근로(연장.야간.휴일근로) : "갑"과"을"은 본 근로계약서 작성으로 회사의 업무 특성상 수반되는 고정적인 시간외근로가 필요한 경우 이에 임할 것을 합의하며, "갑"은 "을"의 임금(연봉월액) 지급시 이를 포함한 포괄임금제로 지급함에 있어 "을"은 이에 동의한다. (시간외수당 가산율은 통상시급의 100분의 50으로 한다)<br/>
+        (3) "을"은 고정적인 시간외근로외에 시간외 근로가 필요한 경우 "갑"에게 보고한 후 승인을 득하여야 하며, 승인을 득하지 아니한 시간외근로는 근로시간으로 보지 아니한다.
+      </div>
+      <div className="keep-together">
+        <strong>제7조(휴일 및 휴가)</strong><br/>
+        (1) 휴일 : 주휴일(1주간 소정근로일수 개근시 주1회), 근로자의 날, 관공서공휴일규정에 따른 공휴일과 대체공휴일<br/> ※ 업무 특성 상 특정 주에 변경되는 주휴일은 휴일변경(대체)하는 것이며, 근로자는 이에 동의한다.<br/>
+        (2) 휴가 : 연차유급휴가는 "근로기준법"에 의한다. (1년간 80퍼센트 이상 출근한 근로자에게 15일 / 1년 미만 근로자의 경우 1개월 개근시 1일)<br/> ※ 근로자가 본인에게 발생한 연차유급휴가일수 보다 더 많은 연차휴가를 사용한 경우 이는 "사용자"가 "근로자"에게 향후 발생할 연차휴가를 선사용하도록 허용한 것이므로 "근로자"가 퇴사하는 경우 더 많이 사용한 연차휴가 일수만큼 임금을 공제할 수 있다.<br/> ※ 1주간 소정근로시간 15시간 미만인 자는 휴일 및 휴가 규정은 적용하지 아니한다. (근로자의 날 제외)
+      </div>
+      <div className="keep-together">
+        <strong>제8조(근로계약의 종료 등)</strong><br/>
+        (1) "을"이 정년에(만60세) 도달하거나 약정한 근로계약기간의 만료로 근로계약은 자동 종료된다.<br/>
+        (2) 근로계약의 만료일이 지정된 경우 계약기간 만료시 본 계약은 자동해지 된다.<br/>
+        (3) "갑"의 해지사유 : "갑"은 정년도래, 기간만료 이외 "갑"의 관련규정 등에서 정한 정당한 사유가 있는 경우에는 "을"의 의사에도 불구하고 근로계약을 해지할 수 있다. 다만, "갑"은 근로기준법에서 규정하고 있는 해고예고의 예외가 되는 근로자의 귀책사유 이외에는 해고예정일 30일전에 서면으로 통보해야 한다.<br/>
+        (4) "을"의 해지사유 : "을"이 정년도래, 기간만료 이외 계약을 해지하고자 하는 경우에는 30일전에 "갑"에게 통보하여야 하고 후임자에게 업무의 인수인계를 하여야 하며, 이를 해태함으로 인하여 "갑"에게 손해가 발생하는 경우에는 이를 배상하여야 한다.
+      </div>
+      <div className="keep-together"><strong>제9조(의무)</strong><br/>"갑"은 "을"의 근무조건 향상을 위하여 최선을 다하여야 하며, "을"은 신의성실의 원칙에 의하여 근로를 제공하여야 한다. 특히 "을"은 "갑"이 정한 안전에 관한 제 규칙과 지시사항을 위반하여 발생한 제반사고는 "을"의 귀책사유로 한다.</div>
+      <div className="keep-together"><strong>제10조(손해배상)</strong><br/>"을"이 계약기간 중 고의 또는 과실로 "갑"에게 손해를 입힌 때에는 이를 배상하여야 한다.</div>
+      <div className="keep-together"><strong>제11조(기타 근로조건)</strong><br/>본 계약서를 작성함에 있어 "을"은 "갑"의 취업규칙 및 제 규정을 열람하였으며 이 계약에 정함이 없는 사항은 관계법령 및 "갑"의 취업규칙 등에 정한 바에 따르며 상기사실을 확실히 하기 위하여 본 계약서를 2통 작성하여 사용자와 근로자가 각 1통씩 보관키로 한다.</div>
+    </div>
+  );
+
   const App = () => {
 
   // 4-4. 주요 헬퍼 함수 (Index.html)
@@ -149,9 +234,13 @@
   // ⭐ 계약일(계샨용)
   const calcEnd = (start, months) => {
     if(!start || !months) return '';
-    const d = new Date(start); 
-    d.setMonth(d.getMonth() + parseInt(months)); 
-    d.setDate(d.getDate() - 1);
+    // ⭐ new Date(start)로 파싱하면 UTC 자정으로 해석되는데, 그 다음 setMonth/setDate는
+    //   브라우저의 "로컬" 시간대 기준으로 동작해서 UTC보다 느린 시간대(예: 미국)에서 열면
+    //   계약/수습 종료일이 하루 밀릴 수 있었다. Date.UTC + setUTCDate로 전부 UTC 기준으로만
+    //   계산해서 어느 시간대에서 열어도 같은 날짜가 나오게 한다.
+    const [y, m, day] = start.split('-').map(Number);
+    const d = new Date(Date.UTC(y, (m - 1) + parseInt(months), day));
+    d.setUTCDate(d.getUTCDate() - 1);
     return d.toISOString().split('T')[0];
   };
 
@@ -167,6 +256,14 @@
     const p = String(s).split('-');
     if (p.length < 3) return s;
     return `${p[0]}년 ${p[1]}월 ${p[2]}일`;
+  };
+
+  // ⭐ google.script.run 공통 실패 처리 — withFailureHandler가 없으면 서버 에러 시
+  //   화면이 "처리중..."에 멈춘 채로 성공인지 실패인지 알 수 없는 상태가 된다.
+  //   중요한 사용자 액션(발송/서명제출/승인 등)에는 이걸로 로딩을 풀고 알려준다.
+  const handleServerError = (error) => {
+    setLoading(false);
+    alert("오류가 발생했습니다. 잠시 후 다시 시도해 주세요.\n(" + (error && error.message ? error.message : String(error)) + ")");
   };
 
   // ⭐ 기존 서명 보여주기
@@ -218,6 +315,10 @@
               alert("유효하지 않거나 삭제된 문서입니다.");
               setIsInvalidLink(true);
             }
+          }).withFailureHandler(err => {
+            clearTimeout(timeoutId); setLoading(false);
+            console.error('계약서 로드 실패:', err);
+            setIsInvalidLink(true);
           }).loadSignedData(id);
         } else {
           google.script.run.withSuccessHandler(data => {
@@ -242,9 +343,13 @@
                 setStep(2); setIsIdentityVerified(false);
               }
             } else { 
-              alert("유효하지 않은 링크입니다."); 
+              alert("유효하지 않은 링크입니다.");
               setIsInvalidLink(true);
             }
+          }).withFailureHandler(err => {
+            clearTimeout(timeoutId); setLoading(false);
+            console.error('계약서 로드 실패:', err);
+            setIsInvalidLink(true);
           }).loadDraftData(id);
         }
       } else { clearTimeout(timeoutId); setLoading(false); }
@@ -269,7 +374,7 @@
           }));
         }
       }
-    }).getConfig();
+    }).withFailureHandler(err => console.error('법인 목록 로드 실패(기본값 사용):', err)).getConfig();
   }, []);
 
   // ⭐ 직인 이미지는 이제 getConfig()에 포함되지 않는다(모든 방문자에게 5개 법인 것을 다 내려주던
@@ -279,7 +384,7 @@
     if (contractStatus === 'COMPLETED' && formData.companyName && !sealImages[formData.companyName] && window.google && window.google.script) {
       google.script.run.withSuccessHandler(sealDataUrl => {
         if (sealDataUrl) setSealImages(prev => ({ ...prev, [formData.companyName]: sealDataUrl }));
-      }).getSealImage(formData.companyName);
+      }).withFailureHandler(err => console.error('직인 이미지 로드 실패:', err)).getSealImage(formData.companyName);
     }
   }, [contractStatus, formData.companyName]);
 
@@ -352,7 +457,7 @@
       } else {
         alert(`발송 완료! (총 ${res ? res.totalCount : workerList.length}명)`);
       }
-    }).sendBatchContracts({ ...formData, sendMode }, workerList);
+    }).withFailureHandler(handleServerError).sendBatchContracts({ ...formData, sendMode }, workerList);
   };
 
   // 4-4. 주요 헬퍼 함수 (Index.html)
@@ -364,7 +469,7 @@
       setLoading(false);
       if (ok) setIsIdentityVerified(true);
       else alert("비밀번호 불일치");
-    }).verifyIdentity(urlId, verificationInput);
+    }).withFailureHandler(handleServerError).verifyIdentity(urlId, verificationInput);
   };
 
   // 4-4. 주요 헬퍼 함수 (Index.html)
@@ -452,7 +557,7 @@
       setSignatures(finalSignatures); 
       setContractStatus('SIGNED_BY_WORKER');
       setStep(3); 
-    }).saveContractData({ ...formData, ...finalSignatures, contractId: urlId });
+    }).withFailureHandler(handleServerError).saveContractData({ ...formData, ...finalSignatures, contractId: urlId });
   };
 
   // 4-4. 주요 헬퍼 함수 (Index.html)
@@ -470,8 +575,17 @@
         justApprovedRef.current = true;
         setContractStatus('COMPLETED');
         alert("최종 승인 및 발송이 완료되었습니다.");
+      }).withFailureHandler(sealErr => {
+        // ⭐ 이 시점엔 approveContract가 이미 성공해서 계약은 COMPLETED로 커밋된 뒤다.
+        //   직인 이미지 조회만 실패한 것이므로 승인 자체를 실패로 보이게 하지 않고,
+        //   직인 없이 완료 화면으로 계속 진행한다.
+        console.error('직인 이미지 로드 실패, 직인 없이 계속 진행:', sealErr);
+        setLoading(false);
+        justApprovedRef.current = true;
+        setContractStatus('COMPLETED');
+        alert("최종 승인은 완료되었습니다. (직인 이미지 표시에는 실패했지만 승인 자체는 정상 처리됨)");
       }).getSealImage(formData.companyName);
-    }).approveContract({ ...formData, ...signatures, contractId: urlId });
+    }).withFailureHandler(handleServerError).approveContract({ ...formData, ...signatures, contractId: urlId });
   };
 
   // ⭐ 승인 직후(직인이 찍힌 최종본이 렌더링된 시점) 화면에 보이는 계약서 그대로를 서버로 보내
@@ -860,70 +974,7 @@
                   </table>
 
                   <div className="mb-4 border-b border-black pb-2 text-sm"><strong>{formData.companyName}</strong>에 재직 중 근로기준법과 취업규칙 및 제반규정을 성실히 준수할 것을 서약하고 다음과 같이 근로계약을 체결한다.</div>
-                  <div className="space-y-4 break-keep text-sm">
-                    <div className="keep-together"><strong>제1조(목적)</strong><br/>본 근로계약서는 "갑"과 "을"이 근로계약을 체결함에 있어 임금, 근로시간 등 근로조건을 정하는 것을 목적으로 한다.</div>
-                    <div className="keep-together"><strong>제2조(근로계약기간)</strong><table className="c-table mt-1 text-sm"><tbody><tr><td className="pl-2 w-24">{formData.contractType === 'regular' ? '■' : '□'} 정규직</td><td className="pl-2">"갑"은 "을"을 기간의 정함이 없는 근로자로서 정년 시까지 고용을 보장한다. <br/>({formatDate(formData.startDate)} ~ 정년 시까지 고용 보장)</td></tr><tr><td className="pl-2">{formData.contractType === 'contract' ? '■' : '□'} 계약직</td><td className="pl-2">{formatDate(formData.startDate)} ~ {formatDate(formData.endDate)} <span className="ml-2">({formData.contractMonths === 'direct' ? '별도협의' : formData.contractMonths + ' 개월'})</span></td></tr><tr><td className="pl-2">{formData.useProbation ? '■' : '□'} 수습기간</td><td className="pl-2">1. 채용일로부터 {formData.probationMonths}개월간 1개월 단위기간으로 종료되는 수습및시용 기간으로 한다. 해당기간 동안 업무적격여부 판단에 따라 수습및시용 기간 중이라도 계약의 해지 또는 본채용을 거부할 수 있다.<br/>2. 업무적격여부 판단기준은 수습평가서에 의해 결정 한다.<br/>3. 본인은 '갑'의 관련규정에 의거 채용일로부터 {formData.probationMonths}개월간 수습및시용 근로자로서 임금을 하향하여 지급받음에 이의를 제기하지 아니한다.<br/>(기간: {formData.useProbation ? formatDate(formData.probationStartDate) + " ~ " + formatDate(formData.probationEndDate) : "      년      월      일 ~      년      월      일까지"} / 월 {formData.probationSalary || '별도 정함'}원)</td></tr></tbody></table></div>
-                    <div className="keep-together"><strong>제3조(근무장소)</strong><br/>"을"의 근무 장소는 {formData.workPlace}(으)로 한다. 다만 "갑"은 인사명령에 의거 "을"의 근무 장소를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.</div>
-                    <div className="keep-together"><strong>제4조(담당업무)</strong><br/>"을"의 담당업무는 {formData.duties}(으)로 한다. 다만, "갑"은 인사명령에 의거 "을"의 담당업무를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.</div>
-                    <div className="keep-together"><strong>제5조(임금)</strong><br/>(1) 임금형태 : "갑"과 "을"은 월급제로 임금계약을 체결한다. (기본급과 법정 제수당이 포함된 "포괄임금")<br/>(2) 임금내용 : 월급총액, 월급의 구성내역, 지급방법 등은 임금계약서에 의한다.<br/>(3) 사정변경 : "갑"은 계약기간 중 제반 경영여건상 처우조건이 불가피하거나, 인사상 처우조정 사유발생시에는 제반기준에 의거 임금을 조정할 수 있다.<br/>(4) 임금인상 : "갑"과 "을"은 근로계약기간이 종료되는 시점에서 업무상 필요성, "갑"의 경영사정에 의거 재계약을 체결할 시 상호 대등한 입장으로 임금인상 등을 협의할 수 있다. 다만 임금내용의 변동이 없는 경우, 또는 임금인상에 대한 합의가 성립 되지 않는 경우 이전과 동일한 금액으로 반복하여 체결하며 "을"은 이에 이의를 제기하지 않는다.<br/>(5) 임금산정일 및 지급일자 : 초일부터 말일까지 계산하여 익월 10일에 지급한다. (단 공휴일일경우에는 그 다음 영업일에 지급한다.)<br/>(6) 비밀유지 : 임금은 회사의 규정과 상사의 지시에 따른 본인의 근로제공에 대한 모든 금전적 보상임을 확인하며 직원상호간 비밀의무를 반드시 준수한다.</div>
-                    
-                    <div className="keep-together"><strong>제6조(근로시간 및 휴게시간)</strong><br/>
-                      (1) "을"의 1주간, 1일의 소정근로시간, 휴게시간은 다음표와 같다. 단, 휴일은 회사 사정에 따라 근무할 수있고, 근로자는 정당한 사유없이 거부할 수 없다.<br/>
-                      <table className="c-table mb-2 mt-2 text-sm">
-                        <colgroup>
-                          <col className="w-[20%]"/>
-                          <col className="w-[48%]"/>
-                          <col className="w-[32%]"/>
-                        </colgroup>
-                        <thead>
-                          <tr>
-                            <td className="bg-gray-label">1 주간</td>
-                            <td className="bg-gray-label">근로시간(시업시각, 종업시각 등)</td>
-                            <td className="bg-gray-label">휴게시간</td>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr>
-                            {formData.isBiweekly ? (
-                              <>
-                                <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleWeek}</td>
-                                <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleWork}</td>
-                                <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleBreak}</td>
-                              </>
-                            ) : (
-                              <>
-                                <td className="text-center">{formData.weeklyWorkHours}시간</td>
-                                <td className="text-center">
-                                  1일 {formData.dailyWorkHours}시간 
-                                  {formData.weeklyWorkDays !== '5' && ` 주 ${formData.weeklyWorkDays}일`}<br/>
-                                  [ 시업 {formData.startTime} ~ 종업 {formData.endTime} ]
-                                </td>
-                                <td className="text-center">{formData.breakTimeMinutes}분 <br/>[ {formData.breakTimeStart}~{formData.breakTimeEnd} ]</td>
-                              </>
-                            )}
-                          </tr>
-                        </tbody>
-                      </table>
-                      * 업무상황 및 근무 여건에 따라 근로 시간 및 휴게시간은 조정 및 변경 될수 있다.<br/>
-                      * 업무상황 및 경영사정에 따라 근무일은 교대제로 운영할 수 있다.<br/><br/>
-                      (2) 시간외근로(연장.야간.휴일근로) : "갑"과"을"은 본 근로계약서 작성으로 회사의 업무 특성상 수반되는 고정적인 시간외근로가 필요한 경우 이에 임할 것을 합의하며, "갑"은 "을"의 임금(연봉월액) 지급시 이를 포함한 포괄임금제로 지급함에 있어 "을"은 이에 동의한다. (시간외수당 가산율은 통상시급의 100분의 50으로 한다)<br/>(3) "을"은 고정적인 시간외근로외에 시간외 근로가 필요한 경우 "갑"에게 보고한 후 승인을 득하여야 하며, 승인을 득하지 아니한 시간외근로는 근로시간으로 보지 아니한다.
-                    </div>
-                    <div className="keep-together">
-                      <strong>제7조(휴일 및 휴가)</strong><br/>
-                      (1) 휴일 : 주휴일(1주간 소정근로일수 개근시 주1회), 근로자의 날, 관공서공휴일규정에 따른 공휴일과 대체공휴일<br/> ※ 업무 특성 상 특정 주에 변경되는 주휴일은 휴일변경(대체)하는 것이며, 근로자는 이에 동의한다.<br/>
-                      (2) 휴가 : 연차유급휴가는 "근로기준법"에 의한다. (1년간 80퍼센트 이상 출근한 근로자에게 15일 / 1년 미만 근로자의 경우 1개월 개근시 1일)<br/> ※ 근로자가 본인에게 발생한 연차유급휴가일수 보다 더 많은 연차휴가를 사용한 경우 이는 "사용자"가 "근로자"에게 향후 발생할 연차휴가를 선사용하도록 허용한 것이므로 "근로자"가 퇴사하는 경우 더 많이 사용한 연차휴가 일수만큼 임금을 공제할 수 있다.<br/> ※ 1주간 소정근로시간 15시간 미만인 자는 휴일 및 휴가 규정은 적용하지 아니한다. (근로자의 날 제외)
-                    </div>
-                    <div className="keep-together">
-                      <strong>제8조(근로계약의 종료 등)</strong><br/>
-                      (1) "을"이 정년에(만60세) 도달하거나 약정한 근로계약기간의 만료로 근로계약은 자동 종료된다.<br/>
-                      (2) 근로계약의 만료일이 지정된 경우 계약기간 만료시 본 계약은 자동해지 된다.<br/>
-                      (3) "갑"의 해지사유 : "갑"은 정년도래, 기간만료 이외 "갑"의 관련규정 등에서 정한 정당한 사유가 있는 경우에는 "을"의 의사에도 불구하고 근로계약을 해지할 수 있다. 다만, "갑"은 근로기준법에서 규정하고 있는 해고예고의 예외가 되는 근로자의 귀책사유 이외에는 해고예정일 30일전에 서면으로 통보해야 한다.<br/>
-                      (4) "을"의 해지사유 : "을"이 정년도래, 기간만료 이외 계약을 해지하고자 하는 경우에는 30일전에 "갑"에게 통보하여야 하고 후임자에게 업무의 인수인계를 하여야 하며, 이를 해태함으로 인하여 "갑"에게 손해가 발생하는 경우에는 이를 배상하여야 한다.
-                    </div>
-                    <div className="keep-together"><strong>제9조(의무)</strong><br/>"갑"은 "을"의 근무조건 향상을 위하여 최선을 다하여야 하며, "을"은 신의성실의 원칙에 의하여 근로를 제공하여야 한다. 특히 "을"은 "갑"이 정한 안전에 관한 제 규칙과 지시사항을 위반하여 발생한 제반사고는 "을"의 귀책사유로 한다.</div>
-                    <div className="keep-together"><strong>제10조(손해배상)</strong><br/>"을"이 계약기간 중 고의 또는 과실로 "갑"에게 손해를 입힌 때에는 이를 배상하여야 한다.</div>
-                    <div className="keep-together"><strong>제11조(기타 근로조건)</strong><br/>본 계약서를 작성함에 있어 "을"은 "갑"의 취업규칙 및 제 규정을 열람하였으며 이 계약에 정함이 없는 사항은 관계법령 및 "갑"의 취업규칙 등에 정한 바에 따르며 상기사실을 확실히 하기 위하여 본 계약서를 2통 작성하여 사용자와 근로자가 각 1통씩 보관키로 한다.</div>
-                  </div>
+                  <ContractArticles formData={formData} className="space-y-4 break-keep text-sm" />
                   <div className="mt-6 space-y-2 text-sm">
                     <div className="border p-2 relative rounded keep-together"><strong>[전자근로계약 체결 동의서]</strong> 동의함 {signatures.sign1 && <img src={signatures.sign1} className="w-20 absolute top-0 right-2 mix-blend-multiply" alt="sign1"/>}</div>
                     <div className="border p-2 relative rounded keep-together"><strong>[연장/야간/휴일근로 동의서]</strong> 동의함 {signatures.sign2 && <img src={signatures.sign2} className="w-20 absolute top-0 right-2 mix-blend-multiply" alt="sign2"/>}</div>
@@ -1185,79 +1236,7 @@
 
               <div className="mb-8 border-b border-black pb-4 text-base"><strong>{formData.companyName}</strong>에 재직 중 근로기준법과 취업규칙 및 제반규정을 성실히 준수할 것을 서약하고 다음과 같이 근로계약을 체결한다.</div>
               
-              <div className="space-y-6 text-sm leading-relaxed text-justify break-keep">
-                <div className="keep-together"><strong>제1조(목적)</strong><br/>본 근로계약서는 "갑"과 "을"이 근로계약을 체결함에 있어 임금, 근로시간 등 근로조건을 정하는 것을 목적으로 한다.</div>
-                <div className="keep-together"><strong>제2조(근로계약기간)</strong>
-                  <table className="c-table mt-1 text-sm">
-                    <tbody>
-                      <tr><td className="pl-2 w-24 bg-gray-label">{formData.contractType === 'regular' ? '■' : '□'} 정규직</td><td className="pl-2">"갑"은 "을"을 기간의 정함이 없는 근로자로서 정년 시까지 고용을 보장한다. <br/>({formatDate(formData.startDate)} ~ 정년 시까지 고용 보장)</td></tr>
-                      <tr><td className="pl-2 bg-gray-label">{formData.contractType === 'contract' ? '■' : '□'} 계약직</td><td className="pl-2">{formatDate(formData.startDate)} ~ {formatDate(formData.endDate)} <span className="ml-2">({formData.contractMonths === 'direct' ? '별도협의' : formData.contractMonths + ' 개월'})</span></td></tr>
-                      <tr><td className="pl-2 bg-gray-label">{formData.useProbation ? '■' : '□'} 수습기간</td><td className="pl-2">1. 채용일로부터 {formData.probationMonths}개월간 1개월 단위 기간으로 종료되는 수습및시용 기간으로 한다. 해당기간 동안 업무적격여부 판단에 따라 수습및시용 기간 중이라도 계약의 해지 또는 본채용을 거부할 수 있다.<br/>2. 업무적격여부 판단기준은 수습평가서에 의해 결정 한다.<br/>3. 본인은 '갑'의 관련규정에 의거 채용일로부터 ({formData.probationMonths})개월간 수습및시용 근로자로서 임금을 하향하여 지급받음에 이의를 제기하지 아니한다.<br/>(기간: {formData.useProbation ? formatDate(formData.probationStartDate) + " ~ " + formatDate(formData.probationEndDate) : "      년      월      일 ~      년      월      일까지"} / 월 {formData.probationSalary || '별도 정함'}원)</td></tr>
-                    </tbody>
-                  </table>
-                </div>
-                <div className="keep-together"><strong>제3조(근무장소)</strong><br/>"을"의 근무 장소는 {formData.workPlace}(으)로 한다. 다만 "갑"은 인사명령에 의거 "을"의 근무 장소를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.</div>
-                <div className="keep-together"><strong>제4조(담당업무)</strong><br/>"을"의 담당업무는 {formData.duties}(으)로  한다. 다만, "갑"은 인사명령에 의거 "을"의 담당업무를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.</div>
-                <div className="keep-together"><strong>제5조(임금)</strong><br/>(1) 임금형태 : "갑"과 "을"은 월급제로 임금계약을 체결한다. (기본급과 법정 제수당이 포함된 "포괄임금")<br/>(2) 임금내용 : 월급총액, 월급의 구성내역, 지급방법 등은 임금계약서에 의한다.<br/>(3) 사정변경 : "갑"은 계약기간 중 제반 경영여건상 처우조건이 불가피하거나, 인사상 처우조정 사유발생시에는 제반기준에 의거 임금을 조정할 수 있다.<br/>(4) 임금인상 : "갑"과 "을"은 근로계약기간이 종료되는 시점에서 업무상 필요성, "갑"의 경영사정에 의거 재계약을 체결할 시 상호 대등한 입장으로 임금인상 등을 협의할 수 있다. 다만 임금내용의 변동이 없는 경우, 또는 임금인상에 대한 합의가 성립 되지 않는 경우 이전과 동일한 금액으로 반복하여 체결하며 "을"은 이에 이의를 제기하지 않는다.<br/>(5) 임금산정일 및 지급일자 : 초일부터 말일까지 계산하여 익월 10일에 지급한다. (단 공휴일일경우에는 그 다음 영업일에 지급한다.)<br/>(6) 비밀유지 : 임금은 회사의 규정과 상사의 지시에 따른 본인의 근로제공에 대한 모든 금전적 보상임을 확인하며 직원상호간 비밀의무를 반드시 준수한다.</div>
-                
-                <div className="keep-together"><strong>제6조(근로시간 및 휴게시간)</strong><br/>
-                  (1) "을"의 1주간, 1일의 소정근로시간, 휴게시간은 다음표와 같다. 단, 휴일은 회사 사정에 따라 근무할 수있고, 근로자는 정당한 사유없이 거부할 수 없다.<br/>
-                  <table className="c-table mt-2 mb-2 text-center table-fixed text-sm">
-                    <colgroup>
-                      <col className="w-[20%]"/>
-                      <col className="w-[48%]"/>
-                      <col className="w-[32%]"/>
-                    </colgroup>
-                    <thead>
-                      <tr>
-                        <td className="bg-gray-label">1 주간</td>
-                        <td className="bg-gray-label">근로시간(시업시각, 종업시각 등)</td>
-                        <td className="bg-gray-label">휴게시간</td>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        {formData.isBiweekly ? (
-                          <>
-                            <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleWeek}</td>
-                            <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleWork}</td>
-                            <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleBreak}</td>
-                          </>
-                        ) : (
-                          <>
-                            <td className="text-center">{formData.weeklyWorkHours}시간</td>
-                            <td className="text-center">
-                              1일 {formData.dailyWorkHours}시간 
-                              {formData.weeklyWorkDays !== '5' && ` 주 ${formData.weeklyWorkDays}일`}
-                              <br/>[ 시업 {formData.startTime} ~ 종업 {formData.endTime} ]
-                            </td>
-                            <td className="text-center">{formData.breakTimeMinutes}분 <br/>[ {formData.breakTimeStart}~{formData.breakTimeEnd} ]</td>
-                          </>
-                        )}
-                      </tr>
-                    </tbody>
-                  </table>
-                  * 업무상황 및 근무 여건에 따라 근로 시간 및 휴게시간은 조정 및 변경 될수 있다.<br/>
-                  * 업무상황 및 경영사정에 따라 근무일은 교대제로 운영할 수 있다.<br/><br/>
-                  (2) 시간외근로(연장.야간.휴일근로) : "갑"과"을"은 본 근로계약서 작성으로 회사의 업무 특성상 수반되는 고정적인 시간외근로가 필요한 경우 이에 임할 것을 합의하며, "갑"은 "을"의 임금(연봉월액) 지급시 이를 포함한 포괄임금제로 지급함에 있어 "을"은 이에 동의한다. (시간외수당 가산율은 통상시급의 100분의 50으로 한다)<br/>
-                  (3) "을"은 고정적인 시간외근로외에 시간외 근로가 필요한 경우 "갑"에게 보고한 후 승인을 득하여야 하며, 승인을 득하지 아니한 시간외근로는 근로시간으로 보지 아니한다.
-                </div>
-                <div className="keep-together">
-                  <strong>제7조(휴일 및 휴가)</strong><br/>
-                  (1) 휴일 : 주휴일(1주간 소정근로일수 개근시 주1회), 근로자의 날, 관공서공휴일규정에 따른 공휴일과 대체공휴일<br/> ※ 업무 특성 상 특정 주에 변경되는 주휴일은 휴일변경(대체)하는 것이며, 근로자는 이에 동의한다.<br/>
-                  (2) 휴가 : 연차유급휴가는 "근로기준법"에 의한다. (1년간 80퍼센트 이상 출근한 근로자에게 15일 / 1년 미만 근로자의 경우 1개월 개근시 1일)<br/> ※ 근로자가 본인에게 발생한 연차유급휴가일수 보다 더 많은 연차휴가를 사용한 경우 이는 "사용자"가 "근로자"에게 향후 발생할 연차휴가를 선사용하도록 허용한 것이므로 "근로자"가 퇴사하는 경우 더 많이 사용한 연차휴가 일수만큼 임금을 공제할 수 있다.<br/> ※ 1주간 소정근로시간 15시간 미만인 자는 휴일 및 휴가 규정은 적용하지 아니한다. (근로자의 날 제외)
-                </div>
-                <div className="keep-together">
-                  <strong>제8조(근로계약의 종료 등)</strong><br/>
-                  (1) "을"이 정년에(만60세) 도달하거나 약정한 근로계약기간의 만료로 근로계약은 자동 종료된다.<br/>
-                  (2) 근로계약의 만료일이 지정된 경우 계약기간 만료시 본 계약은 자동해지 된다.<br/>
-                  (3) "갑"의 해지사유 : "갑"은 정년도래, 기간만료 이외 "갑"의 관련규정 등에서 정한 정당한 사유가 있는 경우에는 "을"의 의사에도 불구하고 근로계약을 해지할 수 있다. 다만, "갑"은 근로기준법에서 규정하고 있는 해고예고의 예외가 되는 근로자의 귀책사유 이외에는 해고예정일 30일전에 서면으로 통보해야 한다.<br/>
-                  (4) "을"의 해지사유 : "을"이 정년도래, 기간만료 이외 계약을 해지하고자 하는 경우에는 30일전에 "갑"에게 통보하여야 하고 후임자에게 업무의 인수인계를 하여야 하며, 이를 해태함으로 인하여 "갑"에게 손해가 발생하는 경우에는 이를 배상하여야 한다.
-                </div>
-                <div className="keep-together"><strong>제9조(의무)</strong><br/>"갑"은 "을"의 근무조건 향상을 위하여 최선을 다하여야 하며, "을"은 신의성실의 원칙에 의하여 근로를 제공하여야 한다. 특히 "을"은 "갑"이 정한 안전에 관한 제 규칙과 지시사항을 위반하여 발생한 제반사고는 "을"의 귀책사유로 한다.</div>
-                <div className="keep-together"><strong>제10조(손해배상)</strong><br/>"을"이 계약기간 중 고의 또는 과실로 "갑"에게 손해를 입힌 때에는 이를 배상하여야 한다.</div>
-                <div className="keep-together"><strong>제11조(기타 근로조건)</strong><br/>본 계약서를 작성함에 있어 "을"은 "갑"의 취업규칙 및 제 규정을 열람하였으며 이 계약에 정함이 없는 사항은 관계법령 및 "갑"의 취업규칙 등에 정한 바에 따르며 상기사실을 확실히 하기 위하여 본 계약서를 2통 작성하여 사용자와 근로자가 각 1통씩 보관키로 한다.</div>
-              </div>
+              <ContractArticles formData={formData} className="space-y-6 text-sm leading-relaxed text-justify break-keep" />
 
               <div className="mt-8 space-y-6 text-sm leading-relaxed text-justify break-keep">
                 {/* 1. 전자계약 동의서 */}
@@ -1356,7 +1335,7 @@
                         if (isWebView) { alert("현재 사용 중인 메일 앱 내부에서는 PDF 저장이 차단되어 있습니다.\n다른 브라우저(Safari, Chrome)를 이용해 주세요."); }
                         window.print();}}
                         className="w-full px-6 py-4 bg-gray-800 text-white rounded-lg font-bold hover:bg-gray-900 shadow-lg text-lg">
-                          Printer className="inline mr-2"/> PDF 저장
+                          <Printer className="inline mr-2"/> PDF 저장
                       </button>
                     </div>
                 ) : (

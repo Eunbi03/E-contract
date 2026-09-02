@@ -213,6 +213,16 @@ function findContractIdInList(listSheet, id) {
   return null;
 }
 
+// ⭐ findRowById와 짝을 이루는 삭제 헬퍼. saveContractData/approveContract가 각자 손으로
+//   반복문을 짜다 보니 시작 인덱스가 0/1로 서로 달랐던 것도 여기로 모으면서 함께 정리된다.
+function deleteRowById(sheet, id, idCol) {
+  if (!sheet) return;
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][idCol]) === String(id)) { sheet.deleteRow(i + 1); return; }
+  }
+}
+
 // 3-3. loadDraftData(id)
 function loadDraftData(id) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -280,14 +290,7 @@ function saveContractData(data) {
   withLock(function () {
     // ⭐ 승인대기 시트 저장 데이터 설정
     targetSheet.appendRow([uniqueId, JSON.stringify(data), 'SIGNED_BY_WORKER', new Date(), viewLink]);
-
-    var pendingSheet = ss.getSheetByName('계약대기');
-    if (pendingSheet) {
-      var rows = pendingSheet.getDataRange().getValues();
-      for (var i = 0; i < rows.length; i++) {
-        if (String(rows[i][0]) === String(uniqueId)) { pendingSheet.deleteRow(i + 1); break; }
-      }
-    }
+    deleteRowById(ss.getSheetByName('계약대기'), uniqueId, 0);
   });
   return "Success";
 }
@@ -312,14 +315,7 @@ function approveContract(data) {
       data.companyName, data.empName, data.empPhone, data.empRegNumber, data.empAddress,
       data.joinDate, viewLink, data.sentAt || "", data.workerSignedAt || "", data.approvedAt, JSON.stringify(data)
     ]);
-
-    var pendingSheet = ss.getSheetByName('승인대기');
-    if (pendingSheet) {
-      var rows = pendingSheet.getDataRange().getValues();
-      for (var i = 1; i < rows.length; i++) {
-        if (String(rows[i][0]) === String(data.contractId)) { pendingSheet.deleteRow(i + 1); break; }
-      }
-    }
+    deleteRowById(ss.getSheetByName('승인대기'), data.contractId, 0);
   });
 
   var todayObj = new Date();
@@ -328,18 +324,26 @@ function approveContract(data) {
   var expireDateStr = Utilities.formatDate(expireDate, "Asia/Seoul", "yyyy년 MM월 dd일");
 
   // ⭐ 계약 완료 메세지 문구
+  //   시트 커밋(승인 자체)은 위에서 이미 끝났으므로, 메일 발송만 실패해도(한도 초과, 잘못된
+  //   주소 등) 승인 전체가 실패한 것처럼 클라이언트에 에러가 전달되지 않도록 별도로 감싼다.
+  //   (클라이언트에 withFailureHandler가 붙어 있어, 여기서 그냥 던지면 이미 완료된 승인을
+  //   "실패"로 오인하고 관리자가 재승인을 시도할 수 있다.)
   if (data.workerContactEmail) {
-    MailApp.sendEmail({
-      to: data.workerContactEmail,
-      subject: "[계약완료] " + data.companyName + " 근로계약서 체결 완료 및 다운로드 안내",
-      body: "안녕하세요. " + data.empName + "님.\n\n" +
-        "전자근로계약이 최종 승인되어 체결이 완료되었습니다.\n" +
-        "아래 링크로 접속하신 후, 화면의 [인쇄 및 PDF 저장] 버튼을 눌러 최종 계약서를 다운로드하여 보관해 주시기 바랍니다.\n\n" +
-        "▶ 최종 계약서 확인 및 PDF 다운로드 링크:" + viewLink + "\n" +
-        "▶ 다운로드 가능 기간: ~ " + expireDateStr + "\n\n" +
-        "담당자: " + (data.managerName || "") + "\n전화번호: " + (data.managerPhone || "") + "\n이메일: " + (data.managerEmail || "") + "\n\n" +
-        "감사합니다."
-    });
+    try {
+      MailApp.sendEmail({
+        to: data.workerContactEmail,
+        subject: "[계약완료] " + data.companyName + " 근로계약서 체결 완료 및 다운로드 안내",
+        body: "안녕하세요. " + data.empName + "님.\n\n" +
+          "전자근로계약이 최종 승인되어 체결이 완료되었습니다.\n" +
+          "아래 링크로 접속하신 후, 화면의 [인쇄 및 PDF 저장] 버튼을 눌러 최종 계약서를 다운로드하여 보관해 주시기 바랍니다.\n\n" +
+          "▶ 최종 계약서 확인 및 PDF 다운로드 링크:" + viewLink + "\n" +
+          "▶ 다운로드 가능 기간: ~ " + expireDateStr + "\n\n" +
+          "담당자: " + (data.managerName || "") + "\n전화번호: " + (data.managerPhone || "") + "\n이메일: " + (data.managerEmail || "") + "\n\n" +
+          "감사합니다."
+      });
+    } catch (e) {
+      Logger.log('완료 안내 메일 발송 실패(' + data.workerContactEmail + '): ' + e);
+    }
   }
   return "Approved";
 }
