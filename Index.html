@@ -85,9 +85,17 @@
   //   이 파일 다른 곳(예: workerStep===2의 세 번째 사본)과 같은 쪽으로 맞췄다:
   //   - "1개월 단위기간" (최종 미리보기에만 "단위 기간"으로 띄어져 있던 것)
   //   - 수습 3항의 "채용일로부터 {개월}개월간" (최종 미리보기에만 괄호가 붙어 있던 것)
-  const ContractArticles = ({ formData, className }) => (
+  // ⭐ 완전 고정 조항(회사명/근무조건 등 가변값이 전혀 없는 제1·9·10·11조)은 "조항템플릿" 시트에서
+  //   불러온 문구가 있으면 그걸 쓰고, 없으면(아직 시트가 안 만들어졌거나 로드 전) 원래 하드코딩
+  //   문구를 그대로 보여준다 — 그래서 시트를 안 건드려도 지금과 완전히 똑같이 동작한다.
+  const ContractArticles = ({ formData, className, clauses }) => {
+    const clause = (num, fallbackTitle, fallbackBody) => {
+      const c = clauses && clauses[String(num)];
+      return <div className="keep-together"><strong>제{num}조({c ? c.title : fallbackTitle})</strong><br/>{c ? c.body : fallbackBody}</div>;
+    };
+    return (
     <div className={className}>
-      <div className="keep-together"><strong>제1조(목적)</strong><br/>본 근로계약서는 "갑"과 "을"이 근로계약을 체결함에 있어 임금, 근로시간 등 근로조건을 정하는 것을 목적으로 한다.</div>
+      {clause(1, '목적', '본 근로계약서는 "갑"과 "을"이 근로계약을 체결함에 있어 임금, 근로시간 등 근로조건을 정하는 것을 목적으로 한다.')}
       <div className="keep-together"><strong>제2조(근로계약기간)</strong>
         <table className="c-table mt-1 text-sm">
           <tbody>
@@ -155,11 +163,12 @@
         (3) "갑"의 해지사유 : "갑"은 정년도래, 기간만료 이외 "갑"의 관련규정 등에서 정한 정당한 사유가 있는 경우에는 "을"의 의사에도 불구하고 근로계약을 해지할 수 있다. 다만, "갑"은 근로기준법에서 규정하고 있는 해고예고의 예외가 되는 근로자의 귀책사유 이외에는 해고예정일 30일전에 서면으로 통보해야 한다.<br/>
         (4) "을"의 해지사유 : "을"이 정년도래, 기간만료 이외 계약을 해지하고자 하는 경우에는 30일전에 "갑"에게 통보하여야 하고 후임자에게 업무의 인수인계를 하여야 하며, 이를 해태함으로 인하여 "갑"에게 손해가 발생하는 경우에는 이를 배상하여야 한다.
       </div>
-      <div className="keep-together"><strong>제9조(의무)</strong><br/>"갑"은 "을"의 근무조건 향상을 위하여 최선을 다하여야 하며, "을"은 신의성실의 원칙에 의하여 근로를 제공하여야 한다. 특히 "을"은 "갑"이 정한 안전에 관한 제 규칙과 지시사항을 위반하여 발생한 제반사고는 "을"의 귀책사유로 한다.</div>
-      <div className="keep-together"><strong>제10조(손해배상)</strong><br/>"을"이 계약기간 중 고의 또는 과실로 "갑"에게 손해를 입힌 때에는 이를 배상하여야 한다.</div>
-      <div className="keep-together"><strong>제11조(기타 근로조건)</strong><br/>본 계약서를 작성함에 있어 "을"은 "갑"의 취업규칙 및 제 규정을 열람하였으며 이 계약에 정함이 없는 사항은 관계법령 및 "갑"의 취업규칙 등에 정한 바에 따르며 상기사실을 확실히 하기 위하여 본 계약서를 2통 작성하여 사용자와 근로자가 각 1통씩 보관키로 한다.</div>
+      {clause(9, '의무', '"갑"은 "을"의 근무조건 향상을 위하여 최선을 다하여야 하며, "을"은 신의성실의 원칙에 의하여 근로를 제공하여야 한다. 특히 "을"은 "갑"이 정한 안전에 관한 제 규칙과 지시사항을 위반하여 발생한 제반사고는 "을"의 귀책사유로 한다.')}
+      {clause(10, '손해배상', '"을"이 계약기간 중 고의 또는 과실로 "갑"에게 손해를 입힌 때에는 이를 배상하여야 한다.')}
+      {clause(11, '기타 근로조건', '본 계약서를 작성함에 있어 "을"은 "갑"의 취업규칙 및 제 규정을 열람하였으며 이 계약에 정함이 없는 사항은 관계법령 및 "갑"의 취업규칙 등에 정한 바에 따르며 상기사실을 확실히 하기 위하여 본 계약서를 2통 작성하여 사용자와 근로자가 각 1통씩 보관키로 한다.')}
     </div>
-  );
+    );
+  };
 
   const App = () => {
 
@@ -198,6 +207,9 @@
   // ⭐ 법인 목록/직인 이미지는 이제 서버(회사설정 시트, 직인 Drive 폴더)에서 불러온다 — 회사 추가/수정 시 코드 배포 없이 시트만 고치면 됨
   const [companies, setCompanies] = useState(DEFAULT_COMPANIES);
   const [sealImages, setSealImages] = useState({});
+  // ⭐ "조항템플릿" 시트에서 불러온 고정 조항(제1·9·10·11조) 재정의 — { '1': {title, body}, ... }.
+  //   비어있으면(=로드 전이거나 시트 미설정) ContractArticles가 기존 하드코딩 문구를 그대로 보여준다.
+  const [clauses, setClauses] = useState({});
 
   // 4-2. formData — 계약서 핵심 데이터 (Index.html)
   // ⭐ 계약서 초기 정보값 설정
@@ -374,6 +386,7 @@
           }));
         }
       }
+      if (cfg && cfg.clauses) setClauses(cfg.clauses);
     }).withFailureHandler(err => console.error('법인 목록 로드 실패(기본값 사용):', err)).getConfig();
   }, []);
 
@@ -974,7 +987,7 @@
                   </table>
 
                   <div className="mb-4 border-b border-black pb-2 text-sm"><strong>{formData.companyName}</strong>에 재직 중 근로기준법과 취업규칙 및 제반규정을 성실히 준수할 것을 서약하고 다음과 같이 근로계약을 체결한다.</div>
-                  <ContractArticles formData={formData} className="space-y-4 break-keep text-sm" />
+                  <ContractArticles formData={formData} clauses={clauses} className="space-y-4 break-keep text-sm" />
                   <div className="mt-6 space-y-2 text-sm">
                     <div className="border p-2 relative rounded keep-together"><strong>[전자근로계약 체결 동의서]</strong> 동의함 {signatures.sign1 && <img src={signatures.sign1} className="w-20 absolute top-0 right-2 mix-blend-multiply" alt="sign1"/>}</div>
                     <div className="border p-2 relative rounded keep-together"><strong>[연장/야간/휴일근로 동의서]</strong> 동의함 {signatures.sign2 && <img src={signatures.sign2} className="w-20 absolute top-0 right-2 mix-blend-multiply" alt="sign2"/>}</div>
@@ -1236,7 +1249,7 @@
 
               <div className="mb-8 border-b border-black pb-4 text-base"><strong>{formData.companyName}</strong>에 재직 중 근로기준법과 취업규칙 및 제반규정을 성실히 준수할 것을 서약하고 다음과 같이 근로계약을 체결한다.</div>
               
-              <ContractArticles formData={formData} className="space-y-6 text-sm leading-relaxed text-justify break-keep" />
+              <ContractArticles formData={formData} clauses={clauses} className="space-y-6 text-sm leading-relaxed text-justify break-keep" />
 
               <div className="mt-8 space-y-6 text-sm leading-relaxed text-justify break-keep">
                 {/* 1. 전자계약 동의서 */}

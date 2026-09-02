@@ -391,8 +391,40 @@ function getOrCreateArchiveFolder() {
 //   전송되는 걸 막을 수 있다.
 function getConfig() {
   return {
-    companies: getCompanySettings()
+    companies: getCompanySettings(),
+    clauses: getClauseTemplates()
   };
+}
+
+// ⭐ 계약서 문구 중 회사명/근무조건 같은 가변 항목이 전혀 없는 순수 고정 조항만 시트로 뺐다.
+//   (제2·6조처럼 정규직/계약직 체크박스나 근로시간 표 같은 조건부 구조가 있는 조항은 자유
+//   텍스트로 바꾸면 오히려 깨지기 쉬워서 지금처럼 코드/사이드바 입력값으로 남겨둔다.)
+//   담당자가 "조항템플릿" 시트의 본문 셀만 고치면 코드 배포 없이 바로 반영된다.
+function getClauseTemplates() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('조항템플릿');
+
+  // ⭐ 시트가 없으면 기존에 코드에 하드코딩돼 있던 문구 그대로 최초 1회 생성해준다.
+  if (!sheet) {
+    sheet = ss.insertSheet('조항템플릿');
+    sheet.appendRow(['조번호', '제목', '본문']);
+    var defaults = [
+      ['1', '목적', '본 근로계약서는 "갑"과 "을"이 근로계약을 체결함에 있어 임금, 근로시간 등 근로조건을 정하는 것을 목적으로 한다.'],
+      ['9', '의무', '"갑"은 "을"의 근무조건 향상을 위하여 최선을 다하여야 하며, "을"은 신의성실의 원칙에 의하여 근로를 제공하여야 한다. 특히 "을"은 "갑"이 정한 안전에 관한 제 규칙과 지시사항을 위반하여 발생한 제반사고는 "을"의 귀책사유로 한다.'],
+      ['10', '손해배상', '"을"이 계약기간 중 고의 또는 과실로 "갑"에게 손해를 입힌 때에는 이를 배상하여야 한다.'],
+      ['11', '기타 근로조건', '본 계약서를 작성함에 있어 "을"은 "갑"의 취업규칙 및 제 규정을 열람하였으며 이 계약에 정함이 없는 사항은 관계법령 및 "갑"의 취업규칙 등에 정한 바에 따르며 상기사실을 확실히 하기 위하여 본 계약서를 2통 작성하여 사용자와 근로자가 각 1통씩 보관키로 한다.']
+    ];
+    defaults.forEach(function (row) { sheet.appendRow(row); });
+  }
+
+  var data = sheet.getDataRange().getValues();
+  var map = {};
+  for (var i = 1; i < data.length; i++) {
+    var num = String(data[i][0]).trim();
+    if (!num) continue;
+    map[num] = { title: data[i][1], body: data[i][2] };
+  }
+  return map;
 }
 
 function getCompanySettings() {
