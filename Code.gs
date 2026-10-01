@@ -58,6 +58,9 @@ function sendBatchContracts(commonData, workerList) {
     var individualData = JSON.parse(JSON.stringify(commonData));
     individualData.contractPassword = worker.password;
     individualData.empName = worker.name;
+    // ⭐ 전화번호(=본인인증 비밀번호)를 근로자 정보 확인 단계의 "연락처"에도 그대로 채워준다.
+    //   관리자가 발송 시 이미 입력한 값이므로 근로자가 또 입력할 필요가 없다(성명과 동일하게).
+    individualData.empPhone = worker.password;
     individualData.workerContactEmail = worker.email;
     individualData.status = 'DRAFT';
     individualData.sentAt = nowStr;
