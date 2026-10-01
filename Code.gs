@@ -136,6 +136,9 @@ function processSendQueue() {
     }
 
     var sentCount = 0, failCount = 0;
+    // ⭐ 서명 요청 메세지 문구 — 이제 "메시지템플릿" 시트(설정 탭에서 관리자가 직접 고침)에서
+    //   가져온다. 청크 전체가 같은 문구를 쓰므로 행마다 다시 읽지 않고 한 번만 불러온다.
+    var messageTemplate = pendingRowIndexes.length ? getMessageTemplate() : null;
 
     for (var k = 0; k < pendingRowIndexes.length; k++) {
       var rowIdx = pendingRowIndexes[k];
@@ -143,8 +146,12 @@ function processSendQueue() {
       var name = row[1], email = row[2], phone = row[3], link = row[4], rowMode = row[5],
           companyName = row[6], managerName = row[7], managerPhone = row[8], managerEmail = row[9];
 
-      // ⭐ 서명 요청 메세지 문구 (기존과 동일)
-      var messageBody = "안녕하세요. " + name + "님.\n" + companyName + "입니다.\n\n입사를 진심으로 환영 드립니다.\n근로계약 체결을 위해 전자근로계약서를 발송드리오니, 내용을 충분히 검토하신 후 전자서명 진행 부탁드립니다.\n\n문의 사항이 있으면 서명 전 반드시 아래 연락처로 연락 부탁드립니다.\n\n감사합니다.\n\n접속 링크: " + link + "\n접속 비밀번호: 본인 휴대전화번호\n\n담당자: " + (managerName || "") + "\n전화번호: " + (managerPhone || "") + "\n이메일: " + (managerEmail || "");
+      var msgVars = {
+        workerName: name, companyName: companyName, link: link,
+        managerName: managerName || '', managerPhone: managerPhone || '', managerEmail: managerEmail || ''
+      };
+      var subject = substituteMessageVariables(messageTemplate.subject, msgVars);
+      var messageBody = substituteMessageVariables(messageTemplate.body, msgVars);
 
       var newStatus = 'SENT';
       try {
@@ -152,7 +159,7 @@ function processSendQueue() {
           MailApp.sendEmail({
             to: email,
             replyTo: managerEmail,
-            subject: "[전자계약] " + companyName + " 전자근로계약서 확인 및 서명 요청",
+            subject: subject,
             body: messageBody
           });
         } else if (rowMode === 'sms') {
@@ -397,7 +404,8 @@ function getConfig() {
   return {
     companies: getCompanySettings(),
     clauses: getClauseTemplates(),
-    defaults: getDefaults()
+    defaults: getDefaults(),
+    messageTemplate: getMessageTemplate()
   };
 }
 
@@ -585,6 +593,50 @@ function saveDefaults(defaultsInput) {
     range.setNumberFormat('@');
     range.setValues([row]);
     return 'OK';
+  });
+}
+
+// ⭐ 근로자에게 계약서를 발송할 때(이메일/문자 공용) 쓰이는 문구. "메시지템플릿" 시트(최초 호출
+//   시 자동 생성)에 저장하며, 설정 탭에서 관리자가 직접 고칠 수 있다(수정 탭의 조항 편집과 같은
+//   {{token}} 자리표시자 + 드래그 변수 블록 방식). 문자(SMS)는 제목이 없어 본문만 쓰인다.
+//   아래 기본값은 지금까지 코드에 하드코딩돼 있던 문구를 그대로 {{token}} 자리표시자로만
+//   바꾼 것이라, 한 번도 고치지 않은 사용자에게는 기존과 완전히 동일하게 발송된다.
+var DEFAULT_MESSAGE_SUBJECT = '[전자계약] {{companyName}} 전자근로계약서 확인 및 서명 요청';
+var DEFAULT_MESSAGE_BODY = '안녕하세요. {{workerName}}님.\n{{companyName}}입니다.\n\n입사를 진심으로 환영 드립니다.\n근로계약 체결을 위해 전자근로계약서를 발송드리오니, 내용을 충분히 검토하신 후 전자서명 진행 부탁드립니다.\n\n문의 사항이 있으면 서명 전 반드시 아래 연락처로 연락 부탁드립니다.\n\n감사합니다.\n\n접속 링크: {{link}}\n접속 비밀번호: 본인 휴대전화번호\n\n담당자: {{managerName}}\n전화번호: {{managerPhone}}\n이메일: {{managerEmail}}';
+
+function getMessageTemplate() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('메시지템플릿');
+  if (!sheet) {
+    sheet = ss.insertSheet('메시지템플릿');
+    sheet.appendRow(['제목', '본문']);
+    sheet.appendRow([DEFAULT_MESSAGE_SUBJECT, DEFAULT_MESSAGE_BODY]);
+  }
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return { subject: DEFAULT_MESSAGE_SUBJECT, body: DEFAULT_MESSAGE_BODY };
+  return {
+    subject: data[1][0] || DEFAULT_MESSAGE_SUBJECT,
+    body: data[1][1] || DEFAULT_MESSAGE_BODY
+  };
+}
+
+function saveMessageTemplate(subject, body) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('메시지템플릿');
+  if (!sheet) { getMessageTemplate(); sheet = ss.getSheetByName('메시지템플릿'); }
+  return withLock(function () {
+    sheet.getRange(2, 1, 1, 2).setValues([[subject, body]]);
+    return 'OK';
+  });
+}
+
+// ⭐ 발송 메시지 본문/제목의 {{token}} 자리표시자를 실제 값으로 치환한다. 수정 탭의
+//   substituteVariables(클라이언트, formData 기준)와 같은 규칙이지만, 이쪽은 서버에서
+//   발송큐 행 데이터(근로자명/링크/담당자 정보 등) 기준으로 치환한다.
+function substituteMessageVariables(template, data) {
+  return String(template || '').replace(/\{\{(\w+)\}\}/g, function (_, token) {
+    var val = data[token];
+    return (val === undefined || val === null) ? '' : String(val);
   });
 }
 

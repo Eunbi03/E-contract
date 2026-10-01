@@ -133,10 +133,12 @@
 
   // ⭐ 저장된 본문({{token}} 자리표시자가 섞인 일반 텍스트/HTML)을 계약서 본문 위에서 직접
   //   수정할 때 보여줄 형태로 바꾼다. {{token}} 자리를 "칩"(삭제 버튼이 달린 변수 블록)으로.
-  const templateToEditorHtml = (template) => {
+  //   fields는 어떤 변수 목록 중에서 라벨을 찾을지(조항 편집=VARIABLE_FIELDS, 발송
+  //   메시지 편집=MESSAGE_VARIABLE_FIELDS) — 기본값은 조항 편집 쪽과 호환되게 유지한다.
+  const templateToEditorHtml = (template, fields = VARIABLE_FIELDS) => {
     if (!template) return '';
     return template.replace(/\{\{(\w+)\}\}/g, (_, token) => {
-      const field = VARIABLE_FIELDS.find(v => v.token === token);
+      const field = fields.find(v => v.token === token);
       return buildChipHtml(token, field ? field.label : token);
     });
   };
@@ -150,17 +152,17 @@
     return clone.innerHTML;
   };
 
-  // ⭐ 수정 탭에서 조항 본문을 계약서 본문 위에서 바로 고칠 때 쓰는 드래그앤드롭/칩 핸들러들.
-  //   사이드바의 변수 블록을 끌어다 본문(계약서 쪽)에 놓는 거라 두 컴포넌트가 이 함수들을
-  //   공유해야 하므로 모듈 스코프에 둔다. draggedChipRef는 App에서 만들어 양쪽에 내려준다.
+  // ⭐ 수정 탭(조항 본문 — 계약서 쪽)과 설정 탭(발송 메시지)이 공유하는 드래그앤드롭/칩
+  //   핸들러들. 어느 쪽이든 "사이드바의 변수 블록을 끌어다 본문에 놓는다"는 동작이 같아서
+  //   모듈 스코프에 둔다. draggedChipRef는 각 화면의 상위 컴포넌트가 만들어 내려준다.
   const insertVariableChipAtCaret = (field) => {
     document.execCommand('insertHTML', false, buildChipHtml(field.token, field.label));
   };
-  const handleEditableBodyDrop = (e, draggedChipRef) => {
+  const handleEditableBodyDrop = (e, draggedChipRef, fields = VARIABLE_FIELDS) => {
     e.preventDefault();
     const token = e.dataTransfer.getData('text/x-variable-token');
     if (token) {
-      const field = VARIABLE_FIELDS.find(v => v.token === token);
+      const field = fields.find(v => v.token === token);
       if (field) insertVariableChipAtCaret(field);
     }
     if (draggedChipRef) draggedChipRef.current = null;
@@ -175,6 +177,44 @@
       const chip = delBtn.closest('[data-token]');
       if (chip) chip.remove();
     }
+  };
+
+  // ⭐ 발송 메시지(이메일/문자 공용) 편집 — 조항 본문과 달리 저장되는 값이 HTML이 아니라
+  //   실제 메일/문자에 그대로 들어가는 "순수 텍스트"(줄바꿈은 \n)라서, 조항 편집의
+  //   templateToEditorHtml/serializeEditorHtml을 그대로 쓸 수 없고 별도 변환이 필요하다.
+  const MESSAGE_VARIABLE_FIELDS = [
+    { token: 'workerName', label: '근로자성명' },
+    { token: 'companyName', label: '법인명' },
+    { token: 'link', label: '접속링크' },
+    { token: 'managerName', label: '담당자명' },
+    { token: 'managerPhone', label: '담당자연락처' },
+    { token: 'managerEmail', label: '담당자이메일' },
+  ];
+  // ⭐ 순수 텍스트 템플릿 → 에디터용 HTML. \n은 <br/>로, {{token}}은 칩으로. 원문 중 &<> 같은
+  //   문자가 있어도 깨지지 않도록 먼저 이스케이프한 뒤 줄바꿈/칩 변환을 적용한다.
+  const messageTemplateToEditorHtml = (template, fields) => {
+    if (!template) return '';
+    const withBreaks = escapeHtmlValue(template).replace(/\n/g, '<br/>');
+    return withBreaks.replace(/\{\{(\w+)\}\}/g, (_, token) => {
+      const field = fields.find(v => v.token === token);
+      return buildChipHtml(token, field ? field.label : token);
+    });
+  };
+  // ⭐ Enter를 누르면 브라우저마다 제각각(<div>/<p>)으로 줄을 나누는 대신, 항상 <br>
+  //   하나만 삽입하도록 강제한다 — 그래야 아래 serializeMessageBody가 줄바꿈을 안정적으로
+  //   \n 하나로 되돌릴 수 있다.
+  const handleMessageBodyKeyDown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); document.execCommand('insertLineBreak'); }
+  };
+  // ⭐ 에디터 DOM → 저장용 순수 텍스트. 칩은 {{token}}으로, <br>은 \n으로 되돌린 뒤
+  //   textContent로 나머지(일반 텍스트)를 그대로 가져온다.
+  const serializeMessageBody = (rootEl) => {
+    const clone = rootEl.cloneNode(true);
+    clone.querySelectorAll('[data-token]').forEach(chip => {
+      chip.replaceWith(document.createTextNode('{{' + chip.getAttribute('data-token') + '}}'));
+    });
+    clone.querySelectorAll('br').forEach(br => br.replaceWith(document.createTextNode('\n')));
+    return clone.textContent;
   };
 
   // ⭐ 제1조~제11조 본문 — 예전에는 workerStep===10(근로자 최종 확인 화면)과 최종 미리보기/인쇄
@@ -447,6 +487,99 @@
     );
   };
 
+  // ⭐ 설정 탭 — 근로자에게 보내는 발송 메시지(이메일/문자 공용) 편집. 수정 탭의 조항 편집과
+  //   같은 "변수 블록을 끌어다 놓으면 칩으로 들어간다" 방식을 그대로 쓰지만, 저장되는 값이
+  //   HTML이 아니라 실제 메일/문자 본문에 바로 들어가는 순수 텍스트라서 변환 로직만 다르다
+  //   (messageTemplateToEditorHtml/serializeMessageBody, 모듈 스코프에 정의).
+  //   SettingsPanel과 같은 이유로 App 바깥(모듈 스코프)에 두고 상태를 props로 받는다.
+  const MessageTemplateEditor = ({ messageTemplate, setMessageTemplate }) => {
+    const [subject, setSubject] = useState(messageTemplate ? messageTemplate.subject : '');
+    const [saving, setSaving] = useState(false);
+    const bodyRef = useRef(null);
+    const draggedChipRef = useRef(null);
+
+    useEffect(() => { if (messageTemplate) setSubject(messageTemplate.subject); }, [messageTemplate]);
+
+    const handleDeleteZoneDragOver = (e) => { if (draggedChipRef.current) e.preventDefault(); };
+    const handleDeleteZoneDrop = (e) => {
+      if (draggedChipRef.current) {
+        e.preventDefault();
+        draggedChipRef.current.remove();
+        draggedChipRef.current = null;
+      }
+    };
+
+    const save = () => {
+      if (!bodyRef.current) return;
+      if (!subject.trim()) return alert('메일 제목을 입력해 주세요.');
+      const body = serializeMessageBody(bodyRef.current);
+      setSaving(true);
+      google.script.run.withSuccessHandler(() => {
+        setSaving(false);
+        setMessageTemplate({ subject, body });
+        alert('저장되었습니다.');
+      }).withFailureHandler(err => { setSaving(false); alert('저장 실패: ' + err); }).saveMessageTemplate(subject, body);
+    };
+
+    if (!messageTemplate) {
+      return (
+        <div className="border-t pt-6">
+          <h3 className="font-bold text-gray-800 mb-3">발송 메시지 (이메일·문자)</h3>
+          <p className="text-sm text-gray-400">불러오는 중...</p>
+        </div>
+      );
+    }
+
+    const initialBodyHtml = messageTemplateToEditorHtml(messageTemplate.body, MESSAGE_VARIABLE_FIELDS);
+
+    return (
+      <div className="border-t pt-6">
+        <h3 className="font-bold text-gray-800 mb-1">발송 메시지 (이메일·문자)</h3>
+        <p className="text-xs text-gray-400 mb-3">근로자에게 계약서를 보낼 때(작성 탭에서 이메일/문자 선택) 쓰이는 문구입니다. 문자는 제목 없이 본문만 전송됩니다.</p>
+
+        <div
+          onDragOver={handleDeleteZoneDragOver}
+          onDrop={handleDeleteZoneDrop}
+          className="p-3 bg-gray-50 border border-dashed border-gray-300 rounded mb-3"
+        >
+          <p className="text-xs font-bold text-gray-500 mb-2">변수 블록 — 끌어서 아래 본문에 놓으세요</p>
+          <div className="flex flex-wrap gap-1">
+            {MESSAGE_VARIABLE_FIELDS.map(f => (
+              <div
+                key={f.token}
+                draggable="true"
+                onDragStart={e => e.dataTransfer.setData('text/x-variable-token', f.token)}
+                className="px-2 py-1.5 bg-white border border-blue-200 rounded cursor-grab text-xs font-bold text-blue-700 hover:bg-blue-50"
+              >
+                {f.label}
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] text-gray-400 pt-2 leading-tight">칩 삭제: × 버튼 / 백스페이스 / 칩을 이 영역으로 끌어오기</p>
+        </div>
+
+        <label className="text-xs font-bold text-gray-600 block mb-1">메일 제목 (이메일에만 사용)</label>
+        <input className="w-full p-2 border rounded text-sm mb-3" value={subject} onChange={e => setSubject(e.target.value)} placeholder="메일 제목" />
+
+        <label className="text-xs font-bold text-gray-600 block mb-1">본문 (이메일 본문 · 문자 내용 공용)</label>
+        <div
+          ref={bodyRef}
+          contentEditable
+          suppressContentEditableWarning
+          dangerouslySetInnerHTML={{ __html: initialBodyHtml }}
+          onClick={handleEditableBodyClick}
+          onKeyDown={handleMessageBodyKeyDown}
+          onDrop={e => handleEditableBodyDrop(e, draggedChipRef, MESSAGE_VARIABLE_FIELDS)}
+          onDragOver={e => e.preventDefault()}
+          onDragStart={e => handleEditableBodyDragStart(e, draggedChipRef)}
+          style={{ whiteSpace: 'pre-wrap' }}
+          className="min-h-[200px] p-3 border-2 border-dashed border-gray-300 rounded bg-white text-sm leading-relaxed focus:border-blue-400 outline-none"
+        />
+        <button onClick={save} disabled={saving} className="w-full mt-3 py-2 bg-blue-600 text-white rounded font-bold text-sm disabled:opacity-50">{saving ? '저장 중...' : '발송 메시지 저장'}</button>
+      </div>
+    );
+  };
+
   // ⭐ 수정 탭 본체 — 이제 본문 편집창을 사이드바에 따로 두지 않는다. 옆에 이미 떠 있는
   //   계약서(.a4-page, ContractArticles)의 해당 조항이 바로 contentEditable이 되어
   //   워드/한글처럼 "용지 위에 글쓰는" 느낌으로 고치고, 여기(사이드바)는 조항 선택 +
@@ -607,6 +740,8 @@
   const [clauses, setClauses] = useState({});
   // ⭐ 설정 탭에서 관리하는 "새 계약서 초기값" (근무장소/담당업무/근로시간 등)
   const [defaults, setDefaults] = useState(null);
+  // ⭐ 설정 탭에서 관리하는 "발송 메시지"(이메일/문자 공용 — 제목은 이메일에만 쓰임)
+  const [messageTemplate, setMessageTemplate] = useState(null);
 
   // 4-2. formData — 계약서 핵심 데이터 (Index.html)
   // ⭐ 계약서 초기 정보값 설정
@@ -784,6 +919,7 @@
         // ⭐ 새 계약서 작성 시(id 없음)에만 기본값을 덮어쓴다 — 이미 불러온/서명 중인 계약서는 건드리지 않음
         if (!hasId) setFormData(prev => ({ ...prev, ...cfg.defaults }));
       }
+      if (cfg && cfg.messageTemplate) setMessageTemplate(cfg.messageTemplate);
     }).withFailureHandler(err => console.error('법인 목록 로드 실패(기본값 사용):', err)).getConfig();
   }, []);
 
@@ -1559,7 +1695,12 @@
                 </div>
                 )}
 
-                {adminTab === '설정' && <SettingsPanel companies={companies} setCompanies={setCompanies} defaults={defaults} setDefaults={setDefaults} />}
+                {adminTab === '설정' && (
+                  <>
+                    <SettingsPanel companies={companies} setCompanies={setCompanies} defaults={defaults} setDefaults={setDefaults} />
+                    <MessageTemplateEditor messageTemplate={messageTemplate} setMessageTemplate={setMessageTemplate} />
+                  </>
+                )}
                 {adminTab === '수정' && (
                   <ClauseEditorPanel
                     clauses={clauses}
