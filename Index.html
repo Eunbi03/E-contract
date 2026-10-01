@@ -126,14 +126,18 @@
   // ⭐ 수정 탭에서 실제로 고칠 수 있는 조항 번호 목록 (제2·6조는 체크박스/표 구조라 제외).
   const EDITABLE_CLAUSE_NUMS = ['1', '3', '4', '5', '7', '8', '9', '10', '11'];
 
-  // ⭐ 저장된 본문({{token}} 자리표시자가 섞인 일반 텍스트/HTML)을 수정 탭 에디터에 보여줄 때,
-  //   {{token}} 자리를 "칩"(삭제 버튼이 달린 변수 블록)으로 바꿔서 보여준다.
+  // ⭐ 변수 칩 하나의 HTML. 자리표시자 → 칩으로 바꿔 보여줄 때(templateToEditorHtml)와
+  //   본문에 새 칩을 끌어다 놓을 때(insertVariableChipAtCaret)가 모두 이 함수를 쓴다.
+  const buildChipHtml = (token, label) =>
+    `<span contenteditable="false" data-token="${token}" class="inline-flex items-center gap-1 bg-blue-100 text-blue-800 text-xs font-bold px-2 py-0.5 rounded-full mx-0.5 align-middle">${escapeHtmlValue(label)}<button type="button" class="chip-delete ml-0.5 text-blue-500 hover:text-red-600" aria-label="삭제">×</button></span>`;
+
+  // ⭐ 저장된 본문({{token}} 자리표시자가 섞인 일반 텍스트/HTML)을 계약서 본문 위에서 직접
+  //   수정할 때 보여줄 형태로 바꾼다. {{token}} 자리를 "칩"(삭제 버튼이 달린 변수 블록)으로.
   const templateToEditorHtml = (template) => {
     if (!template) return '';
     return template.replace(/\{\{(\w+)\}\}/g, (_, token) => {
       const field = VARIABLE_FIELDS.find(v => v.token === token);
-      const label = field ? field.label : token;
-      return `<span contenteditable="false" data-token="${token}" class="inline-flex items-center gap-1 bg-blue-100 text-blue-800 text-xs font-bold px-2 py-0.5 rounded-full mx-0.5 align-middle">${escapeHtmlValue(label)}<button type="button" class="chip-delete ml-0.5 text-blue-500 hover:text-red-600" aria-label="삭제">×</button></span>`;
+      return buildChipHtml(token, field ? field.label : token);
     });
   };
 
@@ -144,6 +148,33 @@
       chip.replaceWith(document.createTextNode('{{' + chip.getAttribute('data-token') + '}}'));
     });
     return clone.innerHTML;
+  };
+
+  // ⭐ 수정 탭에서 조항 본문을 계약서 본문 위에서 바로 고칠 때 쓰는 드래그앤드롭/칩 핸들러들.
+  //   사이드바의 변수 블록을 끌어다 본문(계약서 쪽)에 놓는 거라 두 컴포넌트가 이 함수들을
+  //   공유해야 하므로 모듈 스코프에 둔다. draggedChipRef는 App에서 만들어 양쪽에 내려준다.
+  const insertVariableChipAtCaret = (field) => {
+    document.execCommand('insertHTML', false, buildChipHtml(field.token, field.label));
+  };
+  const handleEditableBodyDrop = (e, draggedChipRef) => {
+    e.preventDefault();
+    const token = e.dataTransfer.getData('text/x-variable-token');
+    if (token) {
+      const field = VARIABLE_FIELDS.find(v => v.token === token);
+      if (field) insertVariableChipAtCaret(field);
+    }
+    if (draggedChipRef) draggedChipRef.current = null;
+  };
+  const handleEditableBodyDragStart = (e, draggedChipRef) => {
+    const chip = e.target.closest && e.target.closest('[data-token]');
+    if (chip && draggedChipRef) { draggedChipRef.current = chip; e.dataTransfer.setData('text/x-existing-chip', '1'); }
+  };
+  const handleEditableBodyClick = (e) => {
+    const delBtn = e.target.closest && e.target.closest('.chip-delete');
+    if (delBtn) {
+      const chip = delBtn.closest('[data-token]');
+      if (chip) chip.remove();
+    }
   };
 
   // ⭐ 제1조~제11조 본문 — 예전에는 workerStep===10(근로자 최종 확인 화면)과 최종 미리보기/인쇄
@@ -158,11 +189,40 @@
   // ⭐ 완전 고정 조항(회사명/근무조건 등 가변값이 전혀 없는 제1·9·10·11조)은 "조항템플릿" 시트에서
   //   불러온 문구가 있으면 그걸 쓰고, 없으면(아직 시트가 안 만들어졌거나 로드 전) 원래 하드코딩
   //   문구를 그대로 보여준다 — 그래서 시트를 안 건드려도 지금과 완전히 똑같이 동작한다.
-  const ContractArticles = ({ formData, className, clauses }) => {
+  // ⭐ editingClauseNum이 넘어오면(관리자 수정 탭 전용 — 근로자 화면에는 절대 전달하지 않음)
+  //   해당 조항만 계약서 위에서 바로 글을 쓰는 느낌으로 contentEditable이 된다. 제목/본문
+  //   ref는 App에서 만들어 사이드바(ClauseEditorPanel)의 저장 버튼과 공유한다.
+  const ContractArticles = ({ formData, className, clauses, editingClauseNum, editableTitleRef, editableBodyRef, draggedChipRef }) => {
     // ⭐ 조항 본문을 조항템플릿 시트 값(없으면 폴백 문구)으로 채우고, {{workPlace}} 같은
     //   자리표시자는 실제 formData 값으로 치환해서 보여준다.
     const clause = (num, fallbackTitle, fallbackBody) => {
       const { title, html } = resolveClause(num, fallbackTitle, fallbackBody, formData, clauses);
+      if (String(num) === editingClauseNum) {
+        const savedBody = clauses && clauses[String(num)] ? clauses[String(num)].body : fallbackBody;
+        return (
+          <div className="keep-together -mx-2 px-2 py-1 bg-blue-50 ring-2 ring-blue-400 rounded">
+            <strong>제{num}조(
+              <span
+                ref={editableTitleRef}
+                contentEditable
+                suppressContentEditableWarning
+                className="inline-block min-w-[2em] outline-none border-b border-dashed border-blue-500"
+              >{title}</span>
+              )</strong><br/>
+            <div
+              ref={editableBodyRef}
+              contentEditable
+              suppressContentEditableWarning
+              dangerouslySetInnerHTML={{ __html: templateToEditorHtml(savedBody) }}
+              onClick={handleEditableBodyClick}
+              onDrop={e => handleEditableBodyDrop(e, draggedChipRef)}
+              onDragOver={e => e.preventDefault()}
+              onDragStart={e => handleEditableBodyDragStart(e, draggedChipRef)}
+              className="outline-none"
+            />
+          </div>
+        );
+      }
       return <div className="keep-together"><strong>제{num}조({title})</strong><br/><span dangerouslySetInnerHTML={{ __html: html }} /></div>;
     };
     return (
@@ -387,54 +447,18 @@
     );
   };
 
-  // ⭐ 수정 탭 — 조항 하나를 골라 제목/본문을 직접 고치는 에디터. 본문은 contentEditable이고,
-  //   왼쪽 변수 블록을 끌어다 넣으면 "칩"(삭제 버튼 달린 둥근 태그)으로 들어간다. 칩은
-  //   ×를 누르거나 백스페이스로, 또는 본문 밖으로 끌어내서 지울 수 있다.
-  //   드래그앤드롭은 브라우저별로 세부 동작이 조금씩 달라질 수 있어, ×버튼/백스페이스를
-  //   항상 되는 대안으로 같이 둔다.
-  const ClauseEditForm = ({ num, clause, onSaved }) => {
-    const [title, setTitle] = useState(clause ? clause.title : '');
+  // ⭐ 수정 탭 본체 — 이제 본문 편집창을 사이드바에 따로 두지 않는다. 옆에 이미 떠 있는
+  //   계약서(.a4-page, ContractArticles)의 해당 조항이 바로 contentEditable이 되어
+  //   워드/한글처럼 "용지 위에 글쓰는" 느낌으로 고치고, 여기(사이드바)는 조항 선택 +
+  //   끌어다 쓰는 변수 블록 + 저장/취소만 남긴다. 실제 제목/본문 DOM은 App이 만든
+  //   editableTitleRef/editableBodyRef를 통해 계약서 쪽과 공유한다.
+  const ClauseEditorPanel = ({ clauses, setClauses, editingClauseNum, setEditingClauseNum, editableTitleRef, editableBodyRef, draggedChipRef }) => {
     const [saving, setSaving] = useState(false);
-    const bodyRef = useRef(null);
-    const draggedChipRef = useRef(null);
-    const initialBodyHtml = templateToEditorHtml(clause ? clause.body : '');
 
-    const insertChip = (field) => {
-      const chipHtml = `<span contenteditable="false" data-token="${field.token}" class="inline-flex items-center gap-1 bg-blue-100 text-blue-800 text-xs font-bold px-2 py-0.5 rounded-full mx-0.5 align-middle">${escapeHtmlValue(field.label)}<button type="button" class="chip-delete ml-0.5 text-blue-500 hover:text-red-600" aria-label="삭제">×</button></span>`;
-      document.execCommand('insertHTML', false, chipHtml);
-    };
-
-    // ⭐ 왼쪽 팔레트에서 변수를 끌어다 본문에 놓았을 때 — 드롭된 지점(브라우저가 자동으로
-    //   캐럿을 옮겨준다)에 칩을 끼워넣는다.
-    const handleBodyDrop = (e) => {
-      e.preventDefault();
-      const token = e.dataTransfer.getData('text/x-variable-token');
-      if (token) {
-        const field = VARIABLE_FIELDS.find(v => v.token === token);
-        if (field) insertChip(field);
-      }
-      draggedChipRef.current = null;
-    };
-
-    // ⭐ 본문 안의 칩을 다시 드래그하기 시작하면 어떤 칩인지 기억해둔다(밖으로 빼서 삭제할 때 씀).
-    const handleBodyDragStart = (e) => {
-      const chip = e.target.closest && e.target.closest('[data-token]');
-      if (chip) { draggedChipRef.current = chip; e.dataTransfer.setData('text/x-existing-chip', '1'); }
-    };
-
-    // ⭐ 칩의 × 버튼 클릭 — raw HTML로 넣은 칩이라 React onClick을 못 달아서, 본문 전체에
-    //   클릭을 위임해서 처리한다.
-    const handleBodyClick = (e) => {
-      const delBtn = e.target.closest && e.target.closest('.chip-delete');
-      if (delBtn) {
-        const chip = delBtn.closest('[data-token]');
-        if (chip) chip.remove();
-      }
-    };
-
-    // ⭐ 칩을 본문 바깥(이 패널의 다른 곳)으로 끌어다 놓으면 삭제.
-    const handlePanelDragOver = (e) => { if (draggedChipRef.current) e.preventDefault(); };
-    const handlePanelDrop = (e) => {
+    // ⭐ 변수 블록을 본문 바깥(이 사이드바 쪽)으로 끌어다 놓으면 삭제 — ×/백스페이스가
+    //   항상 되는 대안이라 본문 입장에서는 세 번째 방법일 뿐이다.
+    const handleDeleteZoneDragOver = (e) => { if (draggedChipRef.current) e.preventDefault(); };
+    const handleDeleteZoneDrop = (e) => {
       if (draggedChipRef.current) {
         e.preventDefault();
         draggedChipRef.current.remove();
@@ -442,83 +466,70 @@
       }
     };
 
+    const selectClause = (num) => {
+      if (num === editingClauseNum) { setEditingClauseNum(null); return; }
+      setEditingClauseNum(num);
+    };
+
+    const cancel = () => setEditingClauseNum(null);
+
     const save = () => {
-      if (!bodyRef.current) return;
-      if (!title.trim()) return alert('조항 제목을 입력해 주세요.');
-      const body = serializeEditorHtml(bodyRef.current);
+      const num = editingClauseNum;
+      if (!num || !editableTitleRef.current || !editableBodyRef.current) return;
+      const title = editableTitleRef.current.textContent.trim();
+      if (!title) return alert('조항 제목을 입력해 주세요.');
+      const body = serializeEditorHtml(editableBodyRef.current);
       setSaving(true);
       google.script.run.withSuccessHandler(() => {
         setSaving(false);
-        onSaved(title, body);
+        setClauses(prev => ({ ...prev, [num]: { title, body } }));
         alert('저장되었습니다.');
       }).withFailureHandler(err => { setSaving(false); alert('저장 실패: ' + err); }).saveClauseTemplate(num, title, body);
     };
 
     return (
-      <div onDragOver={handlePanelDragOver} onDrop={handlePanelDrop}>
-        <div className="flex gap-3 mb-3 items-center">
-          <span className="text-sm font-bold text-gray-500 shrink-0">제{num}조</span>
-          <input className="flex-1 p-2 border rounded text-sm font-bold" value={title} onChange={e => setTitle(e.target.value)} placeholder="조항 제목" />
-        </div>
-        <div className="flex gap-4">
-          <div className="w-28 shrink-0 space-y-1">
-            <p className="text-xs font-bold text-gray-500 mb-1">변수 블록</p>
-            {VARIABLE_FIELDS.map(f => (
-              <div
-                key={f.token}
-                draggable="true"
-                onDragStart={e => e.dataTransfer.setData('text/x-variable-token', f.token)}
-                className="px-2 py-2 bg-white border border-blue-200 rounded cursor-grab text-xs font-bold text-blue-700 hover:bg-blue-50 text-center"
-              >
-                {f.label}
-              </div>
-            ))}
-            <p className="text-[11px] text-gray-400 pt-1 leading-tight">끌어서 본문에 넣으세요</p>
-          </div>
-          <div
-            ref={bodyRef}
-            contentEditable
-            suppressContentEditableWarning
-            dangerouslySetInnerHTML={{ __html: initialBodyHtml }}
-            onClick={handleBodyClick}
-            onDrop={handleBodyDrop}
-            onDragOver={e => e.preventDefault()}
-            onDragStart={handleBodyDragStart}
-            className="flex-1 min-h-[160px] p-3 border-2 border-dashed border-gray-300 rounded bg-white text-sm leading-relaxed focus:border-blue-400 outline-none"
-          />
-        </div>
-        <p className="text-xs text-gray-400 mt-2">변수 칩은 ×를 누르거나 백스페이스로, 또는 본문 밖으로 끌어내 지울 수 있습니다.</p>
-        <button onClick={save} disabled={saving} className="w-full mt-3 py-2 bg-blue-600 text-white rounded font-bold text-sm disabled:opacity-50">{saving ? '저장 중...' : '이 조항 저장'}</button>
-      </div>
-    );
-  };
-
-  // ⭐ 수정 탭 본체 — 조항 선택 목록 + 선택된 조항의 편집 폼(ClauseEditForm).
-  //   SettingsPanel과 같은 이유로 App 바깥(모듈 스코프)에 둔다.
-  const ClauseEditorPanel = ({ clauses, setClauses }) => {
-    const [selectedNum, setSelectedNum] = useState(EDITABLE_CLAUSE_NUMS[0]);
-    return (
-      <div className="flex gap-4">
-        <div className="w-24 shrink-0 space-y-1">
-          <p className="text-xs font-bold text-gray-500 mb-2">조항 선택</p>
+      <div>
+        <p className="text-xs font-bold text-gray-500 mb-2">조항을 고르면 오른쪽 계약서 본문이 바로 수정 가능해집니다</p>
+        <div className="grid grid-cols-4 gap-1 mb-4">
           {EDITABLE_CLAUSE_NUMS.map(num => (
             <button
               key={num}
-              onClick={() => setSelectedNum(num)}
-              className={`w-full text-left px-2 py-2 rounded text-sm font-bold ${selectedNum === num ? 'bg-blue-600 text-white' : 'bg-white border text-gray-700 hover:bg-gray-50'}`}
+              onClick={() => selectClause(num)}
+              className={`px-2 py-2 rounded text-sm font-bold ${editingClauseNum === num ? 'bg-blue-600 text-white' : 'bg-white border text-gray-700 hover:bg-gray-50'}`}
             >
               제{num}조
             </button>
           ))}
         </div>
-        <div className="flex-1">
-          <ClauseEditForm
-            key={selectedNum}
-            num={selectedNum}
-            clause={clauses[selectedNum]}
-            onSaved={(title, body) => setClauses(prev => ({ ...prev, [selectedNum]: { title, body } }))}
-          />
-        </div>
+
+        {editingClauseNum && (
+          <>
+            <div
+              onDragOver={handleDeleteZoneDragOver}
+              onDrop={handleDeleteZoneDrop}
+              className="p-3 bg-gray-50 border border-dashed border-gray-300 rounded"
+            >
+              <p className="text-xs font-bold text-gray-500 mb-2">변수 블록 — 끌어서 오른쪽 계약서 본문에 놓으세요</p>
+              <div className="flex flex-wrap gap-1">
+                {VARIABLE_FIELDS.map(f => (
+                  <div
+                    key={f.token}
+                    draggable="true"
+                    onDragStart={e => e.dataTransfer.setData('text/x-variable-token', f.token)}
+                    className="px-2 py-1.5 bg-white border border-blue-200 rounded cursor-grab text-xs font-bold text-blue-700 hover:bg-blue-50"
+                  >
+                    {f.label}
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-gray-400 pt-2 leading-tight">칩을 지울 땐 ×, 백스페이스, 또는 칩을 여기로 끌어다 놓으세요.</p>
+            </div>
+            <div className="flex gap-2 pt-3">
+              <button onClick={save} disabled={saving} className="flex-1 py-2 bg-blue-600 text-white rounded font-bold text-sm disabled:opacity-50">{saving ? '저장 중...' : `제${editingClauseNum}조 저장`}</button>
+              <button onClick={cancel} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded font-bold text-sm">편집 종료</button>
+            </div>
+          </>
+        )}
       </div>
     );
   };
@@ -615,6 +626,13 @@
   // ⭐ 발송 방식은 이제 전역이 아니라 근로자 카드마다 개별 설정 — workerList[i].mode
   // ⭐ 관리자 화면 상단 탭: 작성(기존 발송 화면) / 수정(조항 편집) / 설정(법인·기본값 관리)
   const [adminTab, setAdminTab] = useState('작성');
+  // ⭐ 수정 탭에서 지금 "계약서 위에서" 바로 고치고 있는 조항 번호. null이면 전부 읽기 전용.
+  //   본문/제목 DOM은 ContractArticles(계약서 쪽)에 떠 있고, 사이드바(ClauseEditorPanel)의
+  //   저장 버튼이 이 ref들로 직접 읽어가므로 두 컴포넌트가 ref를 공유해야 해서 App에 둔다.
+  const [editingClauseNum, setEditingClauseNum] = useState(null);
+  const editableTitleRef = useRef(null);
+  const editableBodyRef = useRef(null);
+  const draggedChipRef = useRef(null);
   const [step, setStep] = useState(1); 
   const [loading, setLoading] = useState(false);
   const [workerStep, setWorkerStep] = useState(1);
@@ -1542,7 +1560,17 @@
                 )}
 
                 {adminTab === '설정' && <SettingsPanel companies={companies} setCompanies={setCompanies} defaults={defaults} setDefaults={setDefaults} />}
-                {adminTab === '수정' && <ClauseEditorPanel clauses={clauses} setClauses={setClauses} />}
+                {adminTab === '수정' && (
+                  <ClauseEditorPanel
+                    clauses={clauses}
+                    setClauses={setClauses}
+                    editingClauseNum={editingClauseNum}
+                    setEditingClauseNum={setEditingClauseNum}
+                    editableTitleRef={editableTitleRef}
+                    editableBodyRef={editableBodyRef}
+                    draggedChipRef={draggedChipRef}
+                  />
+                )}
               </>
             ) : (
               <div className="flex flex-col items-center w-full h-full justify-center mt-20">
@@ -1584,7 +1612,15 @@
 
               <div className="mb-8 border-b border-black pb-4 text-base"><strong>{formData.companyName}</strong>에 재직 중 근로기준법과 취업규칙 및 제반규정을 성실히 준수할 것을 서약하고 다음과 같이 근로계약을 체결한다.</div>
               
-              <ContractArticles formData={formData} clauses={clauses} className="space-y-6 text-sm leading-relaxed text-justify break-keep" />
+              <ContractArticles
+                formData={formData}
+                clauses={clauses}
+                className="space-y-6 text-sm leading-relaxed text-justify break-keep"
+                editingClauseNum={(step === 1 && adminTab === '수정') ? editingClauseNum : null}
+                editableTitleRef={editableTitleRef}
+                editableBodyRef={editableBodyRef}
+                draggedChipRef={draggedChipRef}
+              />
 
               <div className="mt-8 space-y-6 text-sm leading-relaxed text-justify break-keep">
                 {/* 1. 전자계약 동의서 */}
