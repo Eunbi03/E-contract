@@ -112,6 +112,17 @@
     });
   };
 
+  // ⭐ 조항 번호 하나를 받아 {title, html}을 돌려주는 범용 헬퍼. ContractArticles(최종
+  //   미리보기/워커10단계)와 근로자 단계별 확인화면(2~6단계)이 보여주는 틀(h3+p vs
+  //   strong+div)은 서로 다르지만, 실제로 가져오는 title/본문 데이터는 이 함수 하나로만
+  //   거치게 해서 "수정 탭에서 바꾸면 어디서든 똑같이 보인다"를 보장한다.
+  const resolveClause = (num, fallbackTitle, fallbackBody, formData, clauses) => {
+    const c = clauses && clauses[String(num)];
+    const title = c ? c.title : fallbackTitle;
+    const html = substituteVariables(c ? c.body : fallbackBody, formData);
+    return { title, html };
+  };
+
   // ⭐ 제1조~제11조 본문 — 예전에는 workerStep===10(근로자 최종 확인 화면)과 최종 미리보기/인쇄
   //   화면에 이 조항 전체가 거의 그대로 두 번 복붙돼 있었다(코드리뷰 지적사항). 문구를 손으로
   //   옮겨 적을 때 실제로 두 군데 사이에 미세한 표기 차이가 이미 생겨 있었는데(아래 참고),
@@ -128,9 +139,7 @@
     // ⭐ 조항 본문을 조항템플릿 시트 값(없으면 폴백 문구)으로 채우고, {{workPlace}} 같은
     //   자리표시자는 실제 formData 값으로 치환해서 보여준다.
     const clause = (num, fallbackTitle, fallbackBody) => {
-      const c = clauses && clauses[String(num)];
-      const title = c ? c.title : fallbackTitle;
-      const html = substituteVariables(c ? c.body : fallbackBody, formData);
+      const { title, html } = resolveClause(num, fallbackTitle, fallbackBody, formData, clauses);
       return <div className="keep-together"><strong>제{num}조({title})</strong><br/><span dangerouslySetInnerHTML={{ __html: html }} /></div>;
     };
     return (
@@ -835,9 +844,13 @@
   const addWorker = () => {
     if (workerList.length >= 10) return alert("최대 10명"); setWorkerList([...workerList, { name: '', email: '', password: '', mode: 'email' }]); };
     const removeWorker = (index) => { if (workerList.length === 1) return; 
-    const newList = [...workerList]; newList.splice(index, 1); 
-    setWorkerList(newList); 
+    const newList = [...workerList]; newList.splice(index, 1);
+    setWorkerList(newList);
   };
+
+  // ⭐ 근로자 단계별 확인화면(2~6단계)에서 쓰는 축약형 — resolveClause에 formData/clauses를
+  //   매번 넘기지 않도록 묶어둔다. 반환값은 { title, html } 그대로.
+  const stepClause = (num, fallbackTitle, fallbackBody) => resolveClause(num, fallbackTitle, fallbackBody, formData, clauses);
 
   if (loading) return <div className="h-screen flex items-center justify-center font-bold text-xl">처리중...</div>;
 
@@ -930,11 +943,13 @@
             )}
             
             {/* ⭐ [단계2]제1~2조*/}
-            {workerStep === 2 && (
+            {workerStep === 2 && (() => {
+              const c1 = stepClause(1, '목적', '본 근로계약서는 "갑"과 "을"이 근로계약을 체결함에 있어 임금, 근로시간 등 근로조건을 정하는 것을 목적으로 한다.');
+              return (
               <div className="space-y-6">
                 <div>
-                  <h3 className="font-bold text-base mb-1">제1조(목적)</h3>
-                  <p className="pl-4 text-base">본 근로계약서는 "갑"과 "을"이 근로계약을 체결함에 있어 임금, 근로시간 등 근로조건을 정하는 것을 목적으로 한다.</p> 
+                  <h3 className="font-bold text-base mb-1">제1조({c1.title})</h3>
+                  <p className="pl-4 text-base" dangerouslySetInnerHTML={{ __html: c1.html }} />
                 </div>
                 <div>
                   <h3 className="font-bold text-base mb-1">제2조(근로계약기간)</h3>
@@ -964,33 +979,31 @@
                     </tbody>
                   </table>
                 </div>
-              </div>)}
-            
+              </div>);
+            })()}
+
             {/* ⭐ [단계3]제3~5조*/}
-            {workerStep === 3 && (
+            {workerStep === 3 && (() => {
+              const c3 = stepClause(3, '근무장소', '"을"의 근무 장소는 {{workPlace}}(으)로 한다. 다만 "갑"은 인사명령에 의거 "을"의 근무 장소를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.');
+              const c4 = stepClause(4, '담당업무', '"을"의 담당업무는 {{duties}}(으)로 한다. 다만, "갑"은 인사명령에 의거 "을"의 담당업무를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.');
+              const c5 = stepClause(5, '임금', '(1) 임금형태 : "갑"과 "을"은 월급제로 임금계약을 체결한다. (기본급과 법정 제수당이 포함된 "포괄임금")<br/>(2) 임금내용 : 월급총액, 월급의 구성내역, 지급방법 등은 임금계약서에 의한다.<br/>(3) 사정변경 : "갑"은 계약기간 중 제반 경영여건상 처우조건이 불가피하거나, 인사상 처우조정 사유발생시에는 제반기준에 의거 임금을 조정할 수 있다.<br/>(4) 임금인상 : "갑"과 "을"은 근로계약기간이 종료되는 시점에서 업무상 필요성, "갑"의 경영사정에 의거 재계약을 체결할 시 상호 대등한 입장으로 임금인상 등을 협의할 수 있다. 다만 임금내용의 변동이 없는 경우, 또는 임금인상에 대한 합의가 성립 되지 않는 경우 이전과 동일한 금액으로 반복하여 체결하며 "을"은 이에 이의를 제기하지 않는다.<br/>(5) 임금산정일 및 지급일자 : 초일부터 말일까지 계산하여 익월 10일에 지급한다. (단 공휴일일경우에는 그 다음 영업일에 지급한다.)<br/>(6) 비밀유지 : 임금은 회사의 규정과 상사의 지시에 따른 본인의 근로제공에 대한 모든 금전적 보상임을 확인하며 직원상호간 비밀의무를 반드시 준수한다.');
+              return (
               <div className="space-y-6">
                 <div>
-                  <h3 className="font-bold text-base mb-1">제3조(근무장소)</h3>
-                  <p className="pl-4 text-base">"을"의 근무 장소는 {formData.workPlace}(으)로 한다. 다만 "갑"은 인사명령에 의거 "을"의 근무 장소를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.</p>
+                  <h3 className="font-bold text-base mb-1">제3조({c3.title})</h3>
+                  <p className="pl-4 text-base" dangerouslySetInnerHTML={{ __html: c3.html }} />
                 </div>
                 <div>
-                  <h3 className="font-bold text-base mb-1">제4조(담당업무)</h3>
-                  <p className="pl-4 text-base">"을"의 담당업무는 {formData.duties}(으)로  한다. 다만, "갑"은 인사명령에 의거 "을"의 담당업무를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.</p>
+                  <h3 className="font-bold text-base mb-1">제4조({c4.title})</h3>
+                  <p className="pl-4 text-base" dangerouslySetInnerHTML={{ __html: c4.html }} />
                 </div>
                 <div>
-                  <h3 className="font-bold text-base mb-1">제5조(임금)</h3>
-                  <div className="pl-4 text-base">
-                    <p className="mb-1">( 1 )  임금형태  :  "갑"과 "을"은 월급제로 임금계약을 체결한다. (기본급과 법정 제수당이 포함된 "포괄임금")</p>
-                    <p className="mb-1">( 2 )  임금내용  :  월급총액, 월급의 구성내역, 지급방법 등은 임금계약서에 의한다.</p>
-                    <p className="mb-1">( 3 )  사정변경  :  "갑"은 계약기간 중 제반 경영여건상 처우조건이 불가피하거나, 인사상 처우조정 사유발생시에는 제반기준에 의거 임금을 조정할 수 있다.</p>
-                    <p className="mb-1">( 4 )  임금인상  :  "갑"과 "을"은 근로계약기간이 종료되는 시점에서 업무상 필요성, "갑"의 경영사정에 의거 재계약을 체결할 시 상호 대등한 입장으로 임금인상 등을 협의할 수 있다.<br/>다만 임금내용의 변동이 없는 경우, 또는 임금인상에 대한 합의가 성립 되지 않는 경우 이전과 동일한 금액으로 반복하여 체결하며 "을"은 이에 이의를 제기하지 않는다.</p>
-                    <p className="mb-1">( 5 )  임금산정일 및 지급일자  : 초일부터 말일까지 계산하여 익월 10일에 지급한다.<br/>(단 공휴일일경우에는 그 다음 영업일에 지급한다.)</p>
-                    <p>( 6 )  비밀유지  :  임금은 회사의 규정과 상사의 지시에 따른 본인의 근로제공에 대한 모든 금전적 보상임을 확인하며 직원상호간 비밀의무를 반드시 준수한다.</p>
-                  </div>
+                  <h3 className="font-bold text-base mb-1">제5조({c5.title})</h3>
+                  <div className="pl-4 text-base" dangerouslySetInnerHTML={{ __html: c5.html }} />
                 </div>
-              </div>
-            )}
-            
+              </div>);
+            })()}
+
             {/* ⭐ [단계4]제6조*/}
             {workerStep === 4 && (
               <div className="space-y-6">
@@ -1042,45 +1055,44 @@
               </div>)}
             
             {/* ⭐ [단계5]제7~8조*/}
-            {workerStep === 5 && (
+            {workerStep === 5 && (() => {
+              const c7 = stepClause(7, '휴일 및 휴가', '(1) 휴일 : 주휴일(1주간 소정근로일수 개근시 주1회), 근로자의 날, 관공서공휴일규정에 따른 공휴일과 대체공휴일<br/> ※ 업무 특성 상 특정 주에 변경되는 주휴일은 휴일변경(대체)하는 것이며, 근로자는 이에 동의한다.<br/>(2) 휴가 : 연차유급휴가는 "근로기준법"에 의한다. (1년간 80퍼센트 이상 출근한 근로자에게 15일 / 1년 미만 근로자의 경우 1개월 개근시 1일)<br/> ※ 근로자가 본인에게 발생한 연차유급휴가일수 보다 더 많은 연차휴가를 사용한 경우 이는 "사용자"가 "근로자"에게 향후 발생할 연차휴가를 선사용하도록 허용한 것이므로 "근로자"가 퇴사하는 경우 더 많이 사용한 연차휴가 일수만큼 임금을 공제할 수 있다.<br/> ※ 1주간 소정근로시간 15시간 미만인 자는 휴일 및 휴가 규정은 적용하지 아니한다. (근로자의 날 제외)');
+              const c8 = stepClause(8, '근로계약의 종료 등', '(1) "을"이 정년에(만60세) 도달하거나 약정한 근로계약기간의 만료로 근로계약은 자동 종료된다.<br/>(2) 근로계약의 만료일이 지정된 경우 계약기간 만료시 본 계약은 자동해지 된다.<br/>(3) "갑"의 해지사유 : "갑"은 정년도래, 기간만료 이외 "갑"의 관련규정 등에서 정한 정당한 사유가 있는 경우에는 "을"의 의사에도 불구하고 근로계약을 해지할 수 있다. 다만, "갑"은 근로기준법에서 규정하고 있는 해고예고의 예외가 되는 근로자의 귀책사유 이외에는 해고예정일 30일전에 서면으로 통보해야 한다.<br/>(4) "을"의 해지사유 : "을"이 정년도래, 기간만료 이외 계약을 해지하고자 하는 경우에는 30일전에 "갑"에게 통보하여야 하고 후임자에게 업무의 인수인계를 하여야 하며, 이를 해태함으로 인하여 "갑"에게 손해가 발생하는 경우에는 이를 배상하여야 한다.');
+              return (
               <div className="space-y-6">
                 <div>
-                  <h3 className="font-bold text-base mb-1">제7조(휴일 및 휴가)</h3>
-                  <div className="pl-4 text-base">
-                    <p className="mb-1">( 1 ) 휴일 : 주휴일(1주간 소정근로일수 개근시 주1회), 근로자의 날, 관공서공휴일규정에 따른 공휴일과 대체공휴일<br/> ※ 업무 특성 상 특정 주에 변경되는 주휴일은 휴일변경(대체)하는 것이며, 근로자는 이에 동의한다.</p>
-                    <p className="mb-1">( 2 ) 휴가 : 연차유급휴가는 "근로기준법"에 의한다.<br/>( 1년간 80퍼센트 이상 출근한 근로자에게 15일 / 1년 미만 근로자의 경우 1개월 개근시 1일 )<br/> ※ 근로자가 본인에게 발생한 연차유급휴가일수 보다 더 많은 연차휴가를 사용한 경우 이는 "사용자"가 "근로자"에게 향후 발생할 연차휴가를 선사용하도록 허용한 것이므로 "근로자"가 퇴사하는 경우 더 많이 사용한 연차휴가 일수만큼 임금을 공제할 수 있다.<br/> ※ 1주간 소정근로시간 15시간 미만인 자는 휴일 및 휴가 규정은 적용하지 아니한다. (근로자의 날 제외)</p>
-                  </div>
+                  <h3 className="font-bold text-base mb-1">제7조({c7.title})</h3>
+                  <div className="pl-4 text-base" dangerouslySetInnerHTML={{ __html: c7.html }} />
                 </div>
                 <div>
-                  <h3 className="font-bold text-base mb-1">제8조(근로계약의 종료 등)</h3>
-                  <div className="pl-4 text-base">
-                    <p className="mb-1">( 1 ) "을"이 정년에(만60세) 도달하거나 약정한 근로계약기간의 만료로 근로계약은 자동 종료된다.</p>
-                    <p className="mb-1">( 2 ) 근로계약의 만료일이 지정된 경우 계약기간 만료시 본 계약은 자동해지 된다.</p>
-                    <p className="mb-1">( 3 ) "갑"의 해지사유 : "갑"은 정년도래, 기간만료 이외 "갑"의 관련규정 등에서 정한 정당한 사유가 있는 경우에는 "을"의 의사에도 불구하고 근로계약을 해지할 수 있다. 다만, "갑"은 근로기준법에서 규정하고 있는 해고예고의 예외가 되는 근로자의 귀책사유 이외에는 해고예정일 30일전에 서면으로 통보해야 한다.</p>
-                    <p>( 4 ) "을"의 해지사유 : "을"이 정년도래, 기간만료 이외 계약을 해지하고자 하는 경우에는 30일전에 "갑"에게 통보하여야 하고 후임자에게 업무의 인수인계를 하여야 하며, 이를 해태함으로 인하여 "갑"에게 손해가 발생하는 경우에는 이를 배상하여야 한다.</p>
-                  </div>
+                  <h3 className="font-bold text-base mb-1">제8조({c8.title})</h3>
+                  <div className="pl-4 text-base" dangerouslySetInnerHTML={{ __html: c8.html }} />
                 </div>
-              </div>)
-            }
+              </div>);
+            })()}
 
-            {/* ⭐ [단계6]제7~11조*/}
-            {workerStep === 6 && (
+            {/* ⭐ [단계6]제9~11조*/}
+            {workerStep === 6 && (() => {
+              const c9 = stepClause(9, '의무', '"갑"은 "을"의 근무조건 향상을 위하여 최선을 다하여야 하며, "을"은 신의성실의 원칙에 의하여 근로를 제공하여야 한다. 특히 "을"은 "갑"이 정한 안전에 관한 제 규칙과 지시사항을 위반하여 발생한 제반사고는 "을"의 귀책사유로 한다.');
+              const c10 = stepClause(10, '손해배상', '"을"이 계약기간 중 고의 또는 과실로 "갑"에게 손해를 입힌 때에는 이를 배상하여야 한다.');
+              const c11 = stepClause(11, '기타 근로조건', '본 계약서를 작성함에 있어 "을"은 "갑"의 취업규칙 및 제 규정을 열람하였으며 이 계약에 정함이 없는 사항은 관계법령 및 "갑"의 취업규칙 등에 정한 바에 따르며 상기사실을 확실히 하기 위하여 본 계약서를 2통 작성하여 사용자와 근로자가 각 1통씩 보관키로 한다.');
+              return (
               <div className="space-y-6">
                 <div>
-                  <h3 className="font-bold text-base mb-1">제9조(의무)</h3>
-                  <p className="pl-4 text-base">"갑"은 "을"의 근무조건 향상을 위하여 최선을 다하여야 하며, "을"은 신의성실의 원칙에 의하여 근로를 제공하여야 한다. 특히 "을"은 "갑"이 정한 안전에 관한 제 규칙과 지시사항을 위반하여 발생한 제반사고는 "을"의 귀책사유로 한다.</p>
+                  <h3 className="font-bold text-base mb-1">제9조({c9.title})</h3>
+                  <p className="pl-4 text-base" dangerouslySetInnerHTML={{ __html: c9.html }} />
                 </div>
                 <div>
-                  <h3 className="font-bold text-base mb-1">제10조(손해배상)</h3>
-                  <p className="pl-4 text-base">"을"이 계약기간 중 고의 또는 과실로 "갑"에게 손해를 입힌 때에는 이를 배상하여야 한다.</p>
+                  <h3 className="font-bold text-base mb-1">제10조({c10.title})</h3>
+                  <p className="pl-4 text-base" dangerouslySetInnerHTML={{ __html: c10.html }} />
                 </div>
                 <div>
-                  <h3 className="font-bold text-base mb-1">제11조(기타 근로조건)</h3>
-                  <p className="pl-4 text-base">본 계약서를 작성함에 있어 "을"은 "갑"의 취업규칙 및 제 규정을 열람하였으며 이 계약에 정함이 없는 사항은 관계법령 및 "갑"의 취업규칙 등에 정한 바에 따르며 상기사실을 확실히 하기 위하여 본 계약서를 2통 작성하여 사용자와 근로자가 각 1통씩 보관키로 한다.</p>
+                  <h3 className="font-bold text-base mb-1">제11조({c11.title})</h3>
+                  <p className="pl-4 text-base" dangerouslySetInnerHTML={{ __html: c11.html }} />
                 </div>
-              </div>)
-            }
-            
+              </div>);
+            })()}
+
             {/* ⭐ [단계7]전자근로계약 체결 동의서*/}
             {workerStep === 7 && (
               <div className="space-y-4">
