@@ -46,7 +46,6 @@ function sendBatchContracts(commonData, workerList) {
   }
 
   var urlBase = ScriptApp.getService().getUrl();
-  var mode = commonData.sendMode || 'email';
   var nowStr = new Date().toLocaleString();
 
   var draftRows = [];
@@ -54,6 +53,8 @@ function sendBatchContracts(commonData, workerList) {
 
   for (var i = 0; i < workerList.length; i++) {
     var worker = workerList[i];
+    // ⭐ 발송 방식(이메일/문자)을 이제 전체 배치 공통이 아니라 근로자별로 받는다.
+    var workerMode = worker.mode || 'email';
     var individualData = JSON.parse(JSON.stringify(commonData));
     individualData.contractPassword = worker.password;
     individualData.empName = worker.name;
@@ -67,7 +68,7 @@ function sendBatchContracts(commonData, workerList) {
 
     var link = urlBase + "?id=" + uniqueId;
     queueRows.push([
-      uniqueId, worker.name, worker.email || '', worker.password || '', link, mode,
+      uniqueId, worker.name, worker.email || '', worker.password || '', link, workerMode,
       commonData.companyName, commonData.managerName || '', commonData.managerPhone || '', commonData.managerEmail || '',
       'PENDING', nowStr
     ]);
@@ -392,7 +393,8 @@ function getOrCreateArchiveFolder() {
 function getConfig() {
   return {
     companies: getCompanySettings(),
-    clauses: getClauseTemplates()
+    clauses: getClauseTemplates(),
+    defaults: getDefaults()
   };
 }
 
@@ -404,27 +406,66 @@ function getClauseTemplates() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName('조항템플릿');
 
-  // ⭐ 시트가 없으면 기존에 코드에 하드코딩돼 있던 문구 그대로 최초 1회 생성해준다.
+  // ⭐ 변수(근무장소/담당업무)가 섞인 조항은 {{workPlace}}, {{duties}} 같은 자리표시자로
+  //   저장해두고, 실제 계약서를 그릴 때 formData 값으로 치환한다.
+  var seedDefaults = {
+    '1': ['목적', '본 근로계약서는 "갑"과 "을"이 근로계약을 체결함에 있어 임금, 근로시간 등 근로조건을 정하는 것을 목적으로 한다.'],
+    '3': ['근무장소', '"을"의 근무 장소는 {{workPlace}}(으)로 한다. 다만 "갑"은 인사명령에 의거 "을"의 근무 장소를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.'],
+    '4': ['담당업무', '"을"의 담당업무는 {{duties}}(으)로 한다. 다만, "갑"은 인사명령에 의거 "을"의 담당업무를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.'],
+    '5': ['임금', '(1) 임금형태 : "갑"과 "을"은 월급제로 임금계약을 체결한다. (기본급과 법정 제수당이 포함된 "포괄임금")<br/>(2) 임금내용 : 월급총액, 월급의 구성내역, 지급방법 등은 임금계약서에 의한다.<br/>(3) 사정변경 : "갑"은 계약기간 중 제반 경영여건상 처우조건이 불가피하거나, 인사상 처우조정 사유발생시에는 제반기준에 의거 임금을 조정할 수 있다.<br/>(4) 임금인상 : "갑"과 "을"은 근로계약기간이 종료되는 시점에서 업무상 필요성, "갑"의 경영사정에 의거 재계약을 체결할 시 상호 대등한 입장으로 임금인상 등을 협의할 수 있다. 다만 임금내용의 변동이 없는 경우, 또는 임금인상에 대한 합의가 성립 되지 않는 경우 이전과 동일한 금액으로 반복하여 체결하며 "을"은 이에 이의를 제기하지 않는다.<br/>(5) 임금산정일 및 지급일자 : 초일부터 말일까지 계산하여 익월 10일에 지급한다. (단 공휴일일경우에는 그 다음 영업일에 지급한다.)<br/>(6) 비밀유지 : 임금은 회사의 규정과 상사의 지시에 따른 본인의 근로제공에 대한 모든 금전적 보상임을 확인하며 직원상호간 비밀의무를 반드시 준수한다.'],
+    '7': ['휴일 및 휴가', '(1) 휴일 : 주휴일(1주간 소정근로일수 개근시 주1회), 근로자의 날, 관공서공휴일규정에 따른 공휴일과 대체공휴일<br/> ※ 업무 특성 상 특정 주에 변경되는 주휴일은 휴일변경(대체)하는 것이며, 근로자는 이에 동의한다.<br/>(2) 휴가 : 연차유급휴가는 "근로기준법"에 의한다. (1년간 80퍼센트 이상 출근한 근로자에게 15일 / 1년 미만 근로자의 경우 1개월 개근시 1일)<br/> ※ 근로자가 본인에게 발생한 연차유급휴가일수 보다 더 많은 연차휴가를 사용한 경우 이는 "사용자"가 "근로자"에게 향후 발생할 연차휴가를 선사용하도록 허용한 것이므로 "근로자"가 퇴사하는 경우 더 많이 사용한 연차휴가 일수만큼 임금을 공제할 수 있다.<br/> ※ 1주간 소정근로시간 15시간 미만인 자는 휴일 및 휴가 규정은 적용하지 아니한다. (근로자의 날 제외)'],
+    '8': ['근로계약의 종료 등', '(1) "을"이 정년에(만60세) 도달하거나 약정한 근로계약기간의 만료로 근로계약은 자동 종료된다.<br/>(2) 근로계약의 만료일이 지정된 경우 계약기간 만료시 본 계약은 자동해지 된다.<br/>(3) "갑"의 해지사유 : "갑"은 정년도래, 기간만료 이외 "갑"의 관련규정 등에서 정한 정당한 사유가 있는 경우에는 "을"의 의사에도 불구하고 근로계약을 해지할 수 있다. 다만, "갑"은 근로기준법에서 규정하고 있는 해고예고의 예외가 되는 근로자의 귀책사유 이외에는 해고예정일 30일전에 서면으로 통보해야 한다.<br/>(4) "을"의 해지사유 : "을"이 정년도래, 기간만료 이외 계약을 해지하고자 하는 경우에는 30일전에 "갑"에게 통보하여야 하고 후임자에게 업무의 인수인계를 하여야 하며, 이를 해태함으로 인하여 "갑"에게 손해가 발생하는 경우에는 이를 배상하여야 한다.'],
+    '9': ['의무', '"갑"은 "을"의 근무조건 향상을 위하여 최선을 다하여야 하며, "을"은 신의성실의 원칙에 의하여 근로를 제공하여야 한다. 특히 "을"은 "갑"이 정한 안전에 관한 제 규칙과 지시사항을 위반하여 발생한 제반사고는 "을"의 귀책사유로 한다.'],
+    '10': ['손해배상', '"을"이 계약기간 중 고의 또는 과실로 "갑"에게 손해를 입힌 때에는 이를 배상하여야 한다.'],
+    '11': ['기타 근로조건', '본 계약서를 작성함에 있어 "을"은 "갑"의 취업규칙 및 제 규정을 열람하였으며 이 계약에 정함이 없는 사항은 관계법령 및 "갑"의 취업규칙 등에 정한 바에 따르며 상기사실을 확실히 하기 위하여 본 계약서를 2통 작성하여 사용자와 근로자가 각 1통씩 보관키로 한다.']
+  };
+  var order = ['1', '3', '4', '5', '7', '8', '9', '10', '11'];
+
   if (!sheet) {
     sheet = ss.insertSheet('조항템플릿');
     sheet.appendRow(['조번호', '제목', '본문']);
-    var defaults = [
-      ['1', '목적', '본 근로계약서는 "갑"과 "을"이 근로계약을 체결함에 있어 임금, 근로시간 등 근로조건을 정하는 것을 목적으로 한다.'],
-      ['9', '의무', '"갑"은 "을"의 근무조건 향상을 위하여 최선을 다하여야 하며, "을"은 신의성실의 원칙에 의하여 근로를 제공하여야 한다. 특히 "을"은 "갑"이 정한 안전에 관한 제 규칙과 지시사항을 위반하여 발생한 제반사고는 "을"의 귀책사유로 한다.'],
-      ['10', '손해배상', '"을"이 계약기간 중 고의 또는 과실로 "갑"에게 손해를 입힌 때에는 이를 배상하여야 한다.'],
-      ['11', '기타 근로조건', '본 계약서를 작성함에 있어 "을"은 "갑"의 취업규칙 및 제 규정을 열람하였으며 이 계약에 정함이 없는 사항은 관계법령 및 "갑"의 취업규칙 등에 정한 바에 따르며 상기사실을 확실히 하기 위하여 본 계약서를 2통 작성하여 사용자와 근로자가 각 1통씩 보관키로 한다.']
-    ];
-    defaults.forEach(function (row) { sheet.appendRow(row); });
   }
 
   var data = sheet.getDataRange().getValues();
-  var map = {};
+  var existingNums = {};
   for (var i = 1; i < data.length; i++) {
-    var num = String(data[i][0]).trim();
-    if (!num) continue;
-    map[num] = { title: data[i][1], body: data[i][2] };
+    var n = String(data[i][0]).trim();
+    if (n) existingNums[n] = true;
+  }
+
+  // ⭐ 1단계(제1·9·10·11조만)에서 이미 만들어둔 시트라도, 이번에 추가된 조항(3·4·5·7·8)만
+  //   모자라게 이어서 채워준다. 이미 있던 조항(관리자가 고쳤을 수 있는)은 건드리지 않는다.
+  order.forEach(function (num) {
+    if (!existingNums[num]) sheet.appendRow([num, seedDefaults[num][0], seedDefaults[num][1]]);
+  });
+
+  data = sheet.getDataRange().getValues();
+  var map = {};
+  for (var j = 1; j < data.length; j++) {
+    var num2 = String(data[j][0]).trim();
+    if (!num2) continue;
+    map[num2] = { title: data[j][1], body: data[j][2] };
   }
   return map;
+}
+
+// ⭐ 수정 탭에서 조항 하나를 저장할 때 호출. 해당 조번호 행이 있으면 제목/본문을 덮어쓰고,
+//   없으면(이론상 getClauseTemplates가 항상 먼저 만들어두므로 거의 없음) 새로 추가한다.
+function saveClauseTemplate(num, title, body) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('조항템플릿');
+  if (!sheet) { getClauseTemplates(); sheet = ss.getSheetByName('조항템플릿'); }
+  return withLock(function () {
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === String(num)) {
+        sheet.getRange(i + 1, 2, 1, 2).setValues([[title, body]]);
+        return 'OK';
+      }
+    }
+    sheet.appendRow([String(num), title, body]);
+    return 'OK';
+  });
 }
 
 function getCompanySettings() {
@@ -456,6 +497,92 @@ function getCompanySettings() {
     });
   }
   return list;
+}
+
+// ⭐ 설정 탭에서 회사를 추가/수정할 때 쓴다. originalName이 있으면(기존 회사 수정, 법인명 자체를
+//   바꾸는 경우 포함) 그 이름의 행을 찾아 전체 필드를 덮어쓰고, 없으면(신규 추가) 새 행을 더한다.
+function upsertCompany(company, originalName) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('회사설정');
+  if (!sheet) { getCompanySettings(); sheet = ss.getSheetByName('회사설정'); }
+
+  var row = [
+    company.name || '', company.address || '', company.phone || '', company.rep || '',
+    company.managerName || '', company.managerPhone || '', company.managerEmail || ''
+  ];
+
+  return withLock(function () {
+    if (originalName) {
+      var data = sheet.getDataRange().getValues();
+      for (var i = 1; i < data.length; i++) {
+        if (String(data[i][0]) === String(originalName)) {
+          sheet.getRange(i + 1, 1, 1, row.length).setValues([row]);
+          return 'OK';
+        }
+      }
+    }
+    sheet.appendRow(row);
+    return 'OK';
+  });
+}
+
+// ⭐ 법인명으로 회사설정 시트에서 해당 행을 삭제한다.
+function deleteCompany(name) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('회사설정');
+  return withLock(function () {
+    deleteRowById(sheet, name, 0);
+    return 'OK';
+  });
+}
+
+// ⭐ 새 계약서를 작성할 때 처음 채워지는 초기값(근무장소/담당업무/근로시간 등)을 시트에서 관리.
+//   설정 탭에서 고치면 다음에 새로 작성하는 계약서부터 반영된다(이미 작성 중인 계약에는 영향 없음).
+var DEFAULT_FIELDS = ['workPlace', 'duties', 'dailyWorkHours', 'weeklyWorkDays', 'startTime', 'endTime', 'breakTimeMinutes', 'breakTimeStart', 'breakTimeEnd'];
+var HARDCODED_DEFAULTS = {
+  workPlace: '새말센터', duties: '사무직', dailyWorkHours: '8', weeklyWorkDays: '5',
+  startTime: '08:00', endTime: '17:00', breakTimeMinutes: '60', breakTimeStart: '11:30', breakTimeEnd: '12:30'
+};
+
+// ⭐ "08:00" 같은 시간 형식 문자열을 시트에 그대로 쓰면 구글시트가 자동으로 시간 값(Date)으로
+//   바꿔버릴 수 있어서, 읽고 쓸 때 모두 이를 방지/보정한다.
+function readDefaultValue(raw, fallback) {
+  if (raw instanceof Date) return Utilities.formatDate(raw, "Asia/Seoul", "HH:mm");
+  if (raw === '' || raw == null) return fallback;
+  return String(raw);
+}
+
+function getDefaults() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('기본값설정');
+  if (!sheet) {
+    sheet = ss.insertSheet('기본값설정');
+    sheet.appendRow(DEFAULT_FIELDS);
+    var seedRow = DEFAULT_FIELDS.map(function (f) { return HARDCODED_DEFAULTS[f]; });
+    var seedRange = sheet.getRange(2, 1, 1, seedRow.length);
+    seedRange.setNumberFormat('@'); // 일반 텍스트로 고정 — 시간 자동변환 방지
+    seedRange.setValues([seedRow]);
+  }
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return HARDCODED_DEFAULTS;
+  var result = {};
+  DEFAULT_FIELDS.forEach(function (f, i) {
+    result[f] = readDefaultValue(data[1][i], HARDCODED_DEFAULTS[f]);
+  });
+  return result;
+}
+
+function saveDefaults(defaultsInput) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('기본값설정');
+  if (!sheet) { getDefaults(); sheet = ss.getSheetByName('기본값설정'); }
+  var row = DEFAULT_FIELDS.map(function (f) { return defaultsInput[f] != null ? String(defaultsInput[f]) : ''; });
+  return withLock(function () {
+    var range = sheet.getRange(2, 1, 1, row.length);
+    range.setNumberFormat('@');
+    range.setValues([row]);
+    return 'OK';
+  });
 }
 
 // ⭐ 직인 이미지: Drive에 "전자근로계약_직인" 폴더를 만들고, 그 안에 "회사설정" 시트의 법인명과
