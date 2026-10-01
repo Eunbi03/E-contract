@@ -652,9 +652,16 @@ function substituteMessageVariables(template, data) {
 //   직인이 아예 찍히지 않는 상태였다 — 이 방식으로 대체한다.)
 //   getConfig()처럼 전체를 다 내려주지 않고 요청한 법인 한 곳의 이미지만 반환한다 — 관리자가
 //   최종 승인한 뒤에만(Index.html 쪽에서 그 시점에만 호출) 실제로 쓰인다.
+// ⭐ 예전엔 실패를 전부 빈 문자열('')로만 돌려줘서, 클라이언트는 "직인이 없다"와
+//   "폴더가 없다"와 "파일명이 안 맞는다"와 "읽기 실패"를 구분할 방법이 없었다 —
+//   그래서 승인 시 직인이 안 찍혀도 화면에 아무 표시도 없이 조용히 넘어갔다.
+//   이제 { dataUrl, status, message } 형태로 돌려줘서 managerApprove()가 이유를
+//   그대로 관리자에게 alert로 보여줄 수 있다. status: 'ok' | 'no_folder' | 'no_match' | 'error'
 function getSealImage(companyName) {
   var folders = DriveApp.getFoldersByName('전자근로계약_직인');
-  if (!folders.hasNext()) return '';
+  if (!folders.hasNext()) {
+    return { dataUrl: '', status: 'no_folder', message: 'Drive에 "전자근로계약_직인" 폴더가 없습니다.' };
+  }
   var folder = folders.next();
   var extensions = ['png', 'jpg', 'jpeg'];
   for (var i = 0; i < extensions.length; i++) {
@@ -662,14 +669,24 @@ function getSealImage(companyName) {
     if (files.hasNext()) {
       try {
         var blob = files.next().getBlob();
-        return 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes());
+        return { dataUrl: 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes()), status: 'ok' };
       } catch (e) {
         Logger.log('직인 이미지 로드 실패(' + companyName + '): ' + e);
-        return '';
+        return { dataUrl: '', status: 'error', message: '직인 이미지 파일을 읽는 중 오류: ' + e };
       }
     }
   }
-  return '';
+  // ⭐ 폴더는 있지만 이 법인명과 정확히 일치하는 파일(.png/.jpg/.jpeg)이 없음 — 폴더 안에
+  //   실제로 뭐가 들어있는지 같이 돌려줘서 "(주)" vs "㈜" 같은 표기 차이를 바로 비교하게 한다.
+  var existingNames = [];
+  var allFiles = folder.getFiles();
+  while (allFiles.hasNext() && existingNames.length < 20) {
+    existingNames.push(allFiles.next().getName());
+  }
+  return {
+    dataUrl: '', status: 'no_match',
+    message: '"' + companyName + '.png(or .jpg/.jpeg)"와 정확히 일치하는 파일이 폴더에 없습니다. 폴더 안 파일: ' + (existingNames.join(', ') || '(비어있음)')
+  };
 }
 
 // ⭐ Solapi API 자격증명 — 코드에 직접 적지 않고 스크립트 속성에서 읽는다.
@@ -683,11 +700,15 @@ function getSolapiCredentials() {
   };
 }
 
+// ⭐ 중요: 이 함수는 더 이상 실패를 조용히 삼키지 않는다 — 실패 시 꼭 throw 해야
+//   processSendQueue()의 try/catch가 "발송큐" 시트의 상태를 FAILED로 표시한다.
+//   예전에는 자격증명 누락/HTTP 오류/Solapi 측 거부(예: 미등록 발신번호)를 모두 그냥
+//   null을 리턴하며 넘겨서, 실제로는 문자가 전혀 안 나갔는데도 시트에는 SENT로 찍혔다
+//   (muteHttpExceptions라 UrlFetchApp 자체는 HTTP 에러에도 throw하지 않기 때문).
 function sendSolapiMessage(to, from, text) {
   var creds = getSolapiCredentials();
   if (!creds.apiKey || !creds.apiSecret) {
-    Logger.log('Solapi 자격증명이 스크립트 속성에 설정되어 있지 않습니다.');
-    return null;
+    throw new Error('Solapi 자격증명(SOLAPI_API_KEY/SOLAPI_API_SECRET)이 스크립트 속성에 설정되어 있지 않습니다.');
   }
 
   const url = "https://api.solapi.com/messages/v4/send-many/detail";
@@ -708,12 +729,29 @@ function sendSolapiMessage(to, from, text) {
 
   const options = { "method": "post", "headers": headers, "payload": JSON.stringify(payload), "muteHttpExceptions": true };
 
+  const response = UrlFetchApp.fetch(url, options);
+  const responseCode = response.getResponseCode();
+  const responseText = response.getContentText();
+  Logger.log("Solapi Response (" + responseCode + "): " + responseText);
+
+  var result;
   try {
-    const response = UrlFetchApp.fetch(url, options);
-    Logger.log("Solapi Response: " + response.getContentText());
-    return JSON.parse(response.getContentText());
+    result = JSON.parse(responseText);
   } catch (e) {
-    Logger.log("Solapi Error: " + e.toString());
-    return null;
+    throw new Error('Solapi 응답을 해석할 수 없습니다(' + responseCode + '): ' + responseText);
   }
+
+  // ⭐ muteHttpExceptions라 HTTP 에러 상태코드여도 fetch 자체는 예외를 던지지 않으므로,
+  //   응답 코드를 직접 확인해서 실패를 던진다(자격증명 오류, 잘못된 요청 등).
+  if (responseCode < 200 || responseCode >= 300) {
+    throw new Error('Solapi 전송 실패(' + responseCode + '): ' + (result.errorMessage || result.message || responseText));
+  }
+  // ⭐ 요청 자체는 200으로 받아줬어도 메시지 단위로 거부될 수 있다 — 가장 흔한 사유는
+  //   "from"(발신번호)이 Solapi에 사전 등록(발신번호 인증)되어 있지 않은 경우다.
+  //   failedMessageList가 있으면 그 내용을 그대로 실패 사유에 담아 던진다.
+  if (result.failedMessageList && result.failedMessageList.length) {
+    var reasons = result.failedMessageList.map(function (m) { return m.statusMessage || m.statusCode || JSON.stringify(m); }).join(', ');
+    throw new Error('Solapi 전송 거부: ' + reasons + ' (발신번호가 Solapi에 등록되어 있는지 확인해주세요)');
+  }
+  return result;
 }
