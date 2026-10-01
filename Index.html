@@ -123,8 +123,17 @@
     return { title, html };
   };
 
-  // ⭐ 수정 탭에서 실제로 고칠 수 있는 조항 번호 목록 (제2·6조는 체크박스/표 구조라 제외).
-  const EDITABLE_CLAUSE_NUMS = ['1', '3', '4', '5', '7', '8', '9', '10', '11'];
+  // ⭐ 수정 탭에서 실제로 고칠 수 있는 조항/문서 목록. 제2·6조는 체크박스/표 구조라 제외.
+  //   consent1/2/3은 조번호가 아니라 근로자 서명 단계(7·8·9단계)에 쓰이는 3종 동의서 —
+  //   조항템플릿 시트를 그대로 재사용하되 문자열 키만 다르게 쓴다.
+  const EDITABLE_CLAUSE_NUMS = ['1', '3', '4', '5', '7', '8', '9', '10', '11', 'consent1', 'consent2', 'consent3'];
+  // ⭐ 수정 탭 선택 버튼에 표시할 이름 — 숫자 조항은 "제N조", 동의서는 짧은 이름을 따로 둔다.
+  const CLAUSE_SELECTOR_LABELS = {
+    consent1: '전자계약 동의서',
+    consent2: '연장·야간·휴일 동의서',
+    consent3: '교부확인',
+  };
+  const clauseSelectorLabel = (num) => CLAUSE_SELECTOR_LABELS[num] || `제${num}조`;
 
   // ⭐ 변수 칩 하나의 HTML. 자리표시자 → 칩으로 바꿔 보여줄 때(templateToEditorHtml)와
   //   본문에 새 칩을 끌어다 놓을 때(insertVariableChipAtCaret)가 모두 이 함수를 쓴다.
@@ -329,6 +338,78 @@
       {clause(10, '손해배상', '"을"이 계약기간 중 고의 또는 과실로 "갑"에게 손해를 입힌 때에는 이를 배상하여야 한다.')}
       {clause(11, '기타 근로조건', '본 계약서를 작성함에 있어 "을"은 "갑"의 취업규칙 및 제 규정을 열람하였으며 이 계약에 정함이 없는 사항은 관계법령 및 "갑"의 취업규칙 등에 정한 바에 따르며 상기사실을 확실히 하기 위하여 본 계약서를 2통 작성하여 사용자와 근로자가 각 1통씩 보관키로 한다.')}
     </div>
+    );
+  };
+
+  // ⭐ 근로자 서명 단계(7·8·9단계)의 동의서 3종 — 예전에는 근로자 단계별 화면과 최종
+  //   미리보기/인쇄 화면에 각각 복붙돼 있었고(코드리뷰에서 잡았던 ContractArticles 중복과
+  //   같은 패턴), 두 사본 사이에 "지급하는"/"지급한는" 같은 사소한 오타 차이도 있었다.
+  //   조항템플릿 시트(consent1/2/3 키)를 그대로 재사용해 수정 탭에서 편집 가능하게 하고,
+  //   ConsentDoc 하나로 합쳐 어디서든 같은 내용을 보여준다. 오타는 둘 중 맞는 표기
+  //   ("지급하는")로 통일했다.
+  const CONSENT_DOCS = [
+    { key: 'consent1', fallbackTitle: '전자근로계약 체결 동의서', fallbackBody: '1) 「전자문서 및 전자거래 기본법」 제4조 제1항에 따라, 본 근로계약서를 전자적 형태(URL 접속 및 전자서명)로 작성 및 체결하는 것에 동의합니다.<br/>2) 「전자서명법」 제3조 제1항 및 제2항에 따라, 본인이 등록한 전자서명이 자필 서명 또는 날인과 동일한 법적 효력을 가짐을 인정합니다.<br/>3) 「전자서명법」 제18조에 근거하여 본인 인증(휴대폰 번호 등)에 대한 관리 의무 및 보안 책임을 확인합니다.<br/>4) 「근로기준법」 제17조 제2항에 따라 근로계약서의 전자적 방법(이메일 또는 링크 등)을 통한 교부에 동의합니다.' },
+    { key: 'consent2', fallbackTitle: '연장/야간/휴일근로 동의서', fallbackBody: '1) 「근로기준법」 제53조(연장근로의 제한) 제1항에 따라 사업장의 업무상황 및 근무표 등에 의하여 요구되는 연장,야간,휴일 근로에 동의합니다.<br/>2) 「근로기준법」 제70조(야간근로와 휴일근로의 제한) 제1항 - 18세 이상 여성이 오후 10시부터 오전6시까지 근로 및 휴일근로에 동의합니다.' },
+    { key: 'consent3', fallbackTitle: '동의 및 교부확인', fallbackBody: '1) 임금 산정방식 및 지급방법의 결정에 동의합니다.<br/>2) 퇴사 시 잔여 임금 및 퇴직금 등은 최초 도래하는 당사 임금지급일에 지급하는 것에 동의합니다.<br/>(1) 임금 지급일 : 매월 초일부터 말일까지의 임금을 익월 15일 지급<br/>(2) 퇴직연금 부담금 납입일 : 매월 초일부터 말일까지의 임금에 대한 부담금을 익월 25일 납입' },
+  ];
+
+  // ⭐ variant="step": 근로자 서명 단계(7·8·9) — 파란 박스만, 서명줄 없음(서명 패드가 따로 아래 있음).
+  //   variant="full": 관리자 미리보기/최종 인쇄 — 서명줄(근로자명 + 서명 이미지) 포함.
+  //   editingClauseNum 등은 관리자의 수정 탭에서만 넘어오며(App에서 step/adminTab으로 게이팅),
+  //   근로자 화면(variant="step", workerStep10)에는 절대 전달하지 않아 편집 모드가 노출되지 않는다.
+  const ConsentDoc = ({ docIndex, formData, clauses, variant, empName, signatureImg, editingClauseNum, editableTitleRef, editableBodyRef, draggedChipRef }) => {
+    const doc = CONSENT_DOCS[docIndex];
+    const { title, html } = resolveClause(doc.key, doc.fallbackTitle, doc.fallbackBody, formData, clauses);
+    const isEditing = doc.key === editingClauseNum;
+
+    const titleClass = variant === 'full' ? 'font-bold text-base mb-2' : 'font-bold text-lg mb-2 text-blue-900';
+
+    const body = isEditing ? (
+      <div className="keep-together -mx-2 px-2 py-1 bg-blue-50 ring-2 ring-blue-400 rounded">
+        <h3 className={titleClass}>[
+          <span
+            ref={editableTitleRef}
+            contentEditable
+            suppressContentEditableWarning
+            className="inline-block min-w-[2em] outline-none border-b border-dashed border-blue-500"
+          >{title}</span>
+          ]</h3>
+        <div
+          ref={editableBodyRef}
+          contentEditable
+          suppressContentEditableWarning
+          dangerouslySetInnerHTML={{ __html: templateToEditorHtml((clauses && clauses[doc.key] ? clauses[doc.key].body : doc.fallbackBody)) }}
+          onClick={handleEditableBodyClick}
+          onDrop={e => handleEditableBodyDrop(e, draggedChipRef)}
+          onDragOver={e => e.preventDefault()}
+          onDragStart={e => handleEditableBodyDragStart(e, draggedChipRef)}
+          className="outline-none"
+        />
+      </div>
+    ) : (
+      <>
+        <h3 className={titleClass}>[{title}]</h3>
+        <span dangerouslySetInnerHTML={{ __html: html }} />
+      </>
+    );
+
+    if (variant === 'step') {
+      return <div className="border-2 border-blue-500 rounded-lg p-4 bg-blue-50">{body}</div>;
+    }
+
+    return (
+      <div className="border border-gray-400 rounded-lg p-4 print:border-black print:rounded-none keep-together">
+        {body}
+        <div className="text-left mt-4 border-t border-gray-200 print:border-black pt-4 flex items-center justify-between">
+          <div>
+            <span className="mr-2">근로자 :</span>
+            <span className="inline-block min-w-[70px] text-center font-bold">{empName}</span>
+          </div>
+          <span className="text-gray-400 text-sm relative inline-block mr-4">( 서명 또는 인 )
+            {signatureImg && <img src={signatureImg} className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-28 h-auto max-w-none object-contain mix-blend-multiply" alt="서명"/>}
+          </span>
+        </div>
+      </div>
     );
   };
 
@@ -622,15 +703,15 @@
 
     return (
       <div>
-        <p className="text-xs font-bold text-gray-500 mb-2">조항을 고르면 오른쪽 계약서 본문이 바로 수정 가능해집니다</p>
-        <div className="grid grid-cols-4 gap-1 mb-4">
+        <p className="text-xs font-bold text-gray-500 mb-2">조항/동의서를 고르면 오른쪽 계약서 본문이 바로 수정 가능해집니다</p>
+        <div className="grid grid-cols-3 gap-1 mb-4">
           {EDITABLE_CLAUSE_NUMS.map(num => (
             <button
               key={num}
               onClick={() => selectClause(num)}
-              className={`px-2 py-2 rounded text-sm font-bold ${editingClauseNum === num ? 'bg-blue-600 text-white' : 'bg-white border text-gray-700 hover:bg-gray-50'}`}
+              className={`px-2 py-2 rounded text-xs font-bold leading-tight ${editingClauseNum === num ? 'bg-blue-600 text-white' : 'bg-white border text-gray-700 hover:bg-gray-50'}`}
             >
-              제{num}조
+              {clauseSelectorLabel(num)}
             </button>
           ))}
         </div>
@@ -658,7 +739,7 @@
               <p className="text-[11px] text-gray-400 pt-2 leading-tight">칩을 지울 땐 ×, 백스페이스, 또는 칩을 여기로 끌어다 놓으세요.</p>
             </div>
             <div className="flex gap-2 pt-3">
-              <button onClick={save} disabled={saving} className="flex-1 py-2 bg-blue-600 text-white rounded font-bold text-sm disabled:opacity-50">{saving ? '저장 중...' : `제${editingClauseNum}조 저장`}</button>
+              <button onClick={save} disabled={saving} className="flex-1 py-2 bg-blue-600 text-white rounded font-bold text-sm disabled:opacity-50">{saving ? '저장 중...' : `${clauseSelectorLabel(editingClauseNum)} 저장`}</button>
               <button onClick={cancel} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded font-bold text-sm">편집 종료</button>
             </div>
           </>
@@ -740,8 +821,16 @@
   const [clauses, setClauses] = useState({});
   // ⭐ 설정 탭에서 관리하는 "새 계약서 초기값" (근무장소/담당업무/근로시간 등)
   const [defaults, setDefaults] = useState(null);
-  // ⭐ 설정 탭에서 관리하는 "발송 메시지"(이메일/문자 공용 — 제목은 이메일에만 쓰임)
-  const [messageTemplate, setMessageTemplate] = useState(null);
+  // ⭐ 설정 탭에서 관리하는 "발송 메시지"(이메일/문자 공용 — 제목은 이메일에만 쓰임).
+  //   null로 두면 서버 getConfig() 응답이 늦거나(혹은 구버전 Code.gs가 배포돼 있어 아예
+  //   안 오거나) 하면 설정 탭이 "불러오는 중..."에서 영영 멈춰버린다. defaults/clauses와
+  //   달리 messageTemplate은 이 기본값 자체가 곧 실제 발송 문구(Code.gs의
+  //   DEFAULT_MESSAGE_SUBJECT/BODY와 동일)라서, 처음부터 바로 보여줘도 안전하다 —
+  //   서버 응답이 오면 그 값으로 덮어쓴다.
+  const [messageTemplate, setMessageTemplate] = useState({
+    subject: '[전자계약] {{companyName}} 전자근로계약서 확인 및 서명 요청',
+    body: '안녕하세요. {{workerName}}님.\n{{companyName}}입니다.\n\n입사를 진심으로 환영 드립니다.\n근로계약 체결을 위해 전자근로계약서를 발송드리오니, 내용을 충분히 검토하신 후 전자서명 진행 부탁드립니다.\n\n문의 사항이 있으면 서명 전 반드시 아래 연락처로 연락 부탁드립니다.\n\n감사합니다.\n\n접속 링크: {{link}}\n접속 비밀번호: 본인 휴대전화번호\n\n담당자: {{managerName}}\n전화번호: {{managerPhone}}\n이메일: {{managerEmail}}'
+  });
 
   // 4-2. formData — 계약서 핵심 데이터 (Index.html)
   // ⭐ 계약서 초기 정보값 설정
@@ -1406,43 +1495,28 @@
               </div>);
             })()}
 
-            {/* ⭐ [단계7]전자근로계약 체결 동의서*/}
+            {/* ⭐ [단계7]전자근로계약 체결 동의서 — ConsentDoc(모듈 스코프)이 조항템플릿 시트
+                 (consent1 키)를 참조. 근로자 화면이라 editingClauseNum 등은 넘기지 않는다. */}
             {workerStep === 7 && (
               <div className="space-y-4">
-                <div className="border-2 border-blue-500 rounded-lg p-4 bg-blue-50">
-                  <h3 className="font-bold text-lg mb-2 text-blue-900">[전자근로계약 체결 동의서]</h3>
-                  <p className="mb-1">1) 「전자문서 및 전자거래 기본법」 제4조 제1항에 따라, 본 근로계약서를 전자적 형태(URL 접속 및 전자서명)로 작성 및 체결하는 것에 동의합니다.</p>
-                  <p className="mb-1">2) 「전자서명법」 제3조 제1항 및 제2항에 따라, 본인이 등록한 전자서명이 자필 서명 또는 날인과 동일한 법적 효력을 가짐을 인정합니다.</p>
-                  <p className="mb-1">3) 「전자서명법」 제18조에 근거하여 본인 인증(휴대폰 번호 등)에 대한 관리 의무 및 보안 책임을 확인합니다.</p>
-                  <p className="mb-1">4) 「근로기준법」 제17조 제2항에 따라 근로계약서의 전자적 방법(이메일 또는 링크 등)을 통한 교부에 동의합니다.</p>
-                </div>
+                <ConsentDoc docIndex={0} formData={formData} clauses={clauses} variant="step" />
                 <p className="font-bold text-center">위 내용에 동의하며 서명합니다.</p>
                 <SignaturePad canvasRef={canvasRef} startDraw={startDraw} moveDraw={moveDraw} setIsDrawing={setIsDrawing} clearCanvas={clearCanvas} />
               </div>)}
-            
-            {/* ⭐ [단계8]연장/야간/휴일근로 동의서*/}
+
+            {/* ⭐ [단계8]연장/야간/휴일근로 동의서 */}
             {workerStep === 8 && (
               <div className="space-y-4">
-                <div className="border-2 border-blue-500 rounded-lg p-4 bg-blue-50">
-                  <h3 className="font-bold text-lg mb-2 text-blue-900">[연장/야간/휴일근로 동의서]</h3>
-                  <p className="text-base mb-2">1) 「근로기준법」 제53조(연장근로의 제한) 제1항에 따라 사업장의 업무상황 및 근무표 등에 의하여 요구되는 연장,야간,휴일 근로에 동의합니다.</p>
-                  <p className="text-base mb-4">2) 「근로기준법」 제70조(야간근로와 휴일근로의 제한) 제1항 - 18세 이상 여성이 오후 10시부터  오전6시까지 근로 및 휴일근로에 동의합니다.</p>
-                </div>
+                <ConsentDoc docIndex={1} formData={formData} clauses={clauses} variant="step" />
                 <p className="font-bold text-center">위 내용에 동의하며 서명합니다.</p>
                 <SignaturePad canvasRef={canvasRef} startDraw={startDraw} moveDraw={moveDraw} setIsDrawing={setIsDrawing} clearCanvas={clearCanvas} />
               </div>
             )}
-            
-            {/* ⭐ [단계9]동의 및 교부확인*/}
+
+            {/* ⭐ [단계9]동의 및 교부확인 */}
             {workerStep === 9 && (
               <div className="space-y-4">
-                <div className="border-2 border-blue-500 rounded-lg p-4 bg-blue-50">
-                  <h3 className="font-bold text-lg mb-2 text-blue-900">[동의 및 교부확인]</h3>
-                  <p className="text-base mb-2">1) 임금 산정방식 및 지급방법의 결정에 동의합니다.</p>
-                  <p className="text-base mb-2">2) 퇴사 시 잔여 임금 및 퇴직금 등은 최초 도래하는 당사 임금지급일에 지급하는 것에 동의합니다.</p>
-                  <p className="text-base pl-4 mb-1"> (1) 임금 지급일 : 매월 초일부터 말일까지의 임금을 익월 15일 지급</p>
-                  <p className="text-base pl-4 mb-4"> (2) 퇴직연금 부담금  납입일 : 매월 초일부터 말일까지의 임금에 대한 부담금을 익월 25일 납입</p>
-                </div>
+                <ConsentDoc docIndex={2} formData={formData} clauses={clauses} variant="step" />
                 <p className="font-bold text-center">위 내용에 동의하며 서명합니다.</p>
                 <SignaturePad canvasRef={canvasRef} startDraw={startDraw} moveDraw={moveDraw} setIsDrawing={setIsDrawing} clearCanvas={clearCanvas} />
               </div>
@@ -1469,9 +1543,10 @@
                   <div className="mb-4 border-b border-black pb-2 text-sm"><strong>{formData.companyName}</strong>에 재직 중 근로기준법과 취업규칙 및 제반규정을 성실히 준수할 것을 서약하고 다음과 같이 근로계약을 체결한다.</div>
                   <ContractArticles formData={formData} clauses={clauses} className="space-y-4 break-keep text-sm" />
                   <div className="mt-6 space-y-2 text-sm">
-                    <div className="border p-2 relative rounded keep-together"><strong>[전자근로계약 체결 동의서]</strong> 동의함 {signatures.sign1 && <img src={signatures.sign1} className="w-20 absolute top-0 right-2 mix-blend-multiply" alt="sign1"/>}</div>
-                    <div className="border p-2 relative rounded keep-together"><strong>[연장/야간/휴일근로 동의서]</strong> 동의함 {signatures.sign2 && <img src={signatures.sign2} className="w-20 absolute top-0 right-2 mix-blend-multiply" alt="sign2"/>}</div>
-                    <div className="border p-2 relative rounded keep-together"><strong>[동의 및 교부확인]</strong> 동의함 {signatures.sign3 && <img src={signatures.sign3} className="w-20 absolute top-0 right-2 mix-blend-multiply" alt="sign3"/>}</div>
+                    {/* ⭐ 제목도 조항템플릿(consent1/2/3)을 참조 — 수정 탭에서 이름을 바꾸면 여기도 같이 바뀐다 */}
+                    <div className="border p-2 relative rounded keep-together"><strong>[{resolveClause('consent1', CONSENT_DOCS[0].fallbackTitle, CONSENT_DOCS[0].fallbackBody, formData, clauses).title}]</strong> 동의함 {signatures.sign1 && <img src={signatures.sign1} className="w-20 absolute top-0 right-2 mix-blend-multiply" alt="sign1"/>}</div>
+                    <div className="border p-2 relative rounded keep-together"><strong>[{resolveClause('consent2', CONSENT_DOCS[1].fallbackTitle, CONSENT_DOCS[1].fallbackBody, formData, clauses).title}]</strong> 동의함 {signatures.sign2 && <img src={signatures.sign2} className="w-20 absolute top-0 right-2 mix-blend-multiply" alt="sign2"/>}</div>
+                    <div className="border p-2 relative rounded keep-together"><strong>[{resolveClause('consent3', CONSENT_DOCS[2].fallbackTitle, CONSENT_DOCS[2].fallbackBody, formData, clauses).title}]</strong> 동의함 {signatures.sign3 && <img src={signatures.sign3} className="w-20 absolute top-0 right-2 mix-blend-multiply" alt="sign3"/>}</div>
                   </div>
                 </div>
                 <div className="mt-4">
@@ -1764,57 +1839,26 @@
               />
 
               <div className="mt-8 space-y-6 text-sm leading-relaxed text-justify break-keep">
-                {/* 1. 전자계약 동의서 */}
-                <div className="border border-gray-400 rounded-lg p-4 print:border-black print:rounded-none keep-together">
-                  <h3 className="font-bold text-base mb-2">[전자근로계약 체결 동의서]</h3>
-                  <p className="mb-1">1) 「전자문서 및 전자거래 기본법」 제4조 제1항에 따라, 본 근로계약서를 전자적 형태(URL 접속 및 전자서명)로 작성 및 체결하는 것에 동의합니다.</p>
-                  <p className="mb-1">2) 「전자서명법」 제3조 제1항 및 제2항에 따라, 본인이 등록한 전자서명이 자필 서명 또는 날인과 동일한 법적 효력을 가짐을 인정합니다.</p>
-                  <p className="mb-1">3) 「전자서명법」 제18조에 근거하여 본인 인증(휴대폰 번호 등)에 대한 관리 의무 및 보안 책임을 확인합니다.</p>
-                  <p className="mb-1">4) 「근로기준법」 제17조 제2항에 따라 근로계약서의 전자적 방법(이메일 또는 링크 등)을 통한 교부에 동의합니다.</p>
-                  <div className="text-left mt-4 border-t border-gray-200 print:border-black pt-4 flex items-center justify-between">
-                    <div>
-                      <span className="mr-2">근로자 :</span>
-                      <span className="inline-block min-w-[70px] text-center font-bold">{formData.empName}</span>
-                    </div>
-                    <span className="text-gray-400 text-sm relative inline-block mr-4">( 서명 또는 인 )
-                      {signatures.sign1 && <img src={signatures.sign1} className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-28 h-auto max-w-none object-contain mix-blend-multiply" alt="서명1"/>}
-                    </span>
-                  </div>
-                </div>
-
-                {/* 2. 연장/야간/휴일 동의서 */}
-                <div className="border border-gray-400 rounded-lg p-4 print:border-black print:rounded-none keep-together">
-                  <h3 className="font-bold text-base mb-2">[연장/야간/휴일근로 동의서]</h3>
-                  <p className="mb-1">1) 「근로기준법」 제53조(연장근로의 제한) 제1항에 따라 사업장의 업무상황 및 근무표 등에 의하여 요구되는 연장,야간,휴일 근로에 동의합니다.</p>
-                  <p className="mb-4">2) 「근로기준법」 제70조(야간근로와 휴일근로의 제한) 제1항 - 18세 이상 여성이 오후 10시부터 오전6시까지 근로 및 휴일근로에 동의합니다.</p>
-                  <div className="text-left mt-4 border-t border-gray-200 print:border-black pt-4 flex items-center justify-between">
-                    <div>
-                      <span className="mr-2">근로자 :</span>
-                      <span className="inline-block min-w-[60px] text-center font-bold">{formData.empName}</span>
-                    </div>
-                    <span className="text-gray-400 text-sm relative inline-block mr-4">( 서명 또는 인 )
-                      {signatures.sign2 && <img src={signatures.sign2} className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-28 h-auto max-w-none object-contain mix-blend-multiply" alt="서명2"/>}
-                    </span>
-                  </div>
-                </div>
-
-                {/* 3. 교부 확인 */}
-                <div className="border border-gray-400 rounded-lg p-4 print:border-black print:rounded-none keep-together">
-                  <h3 className="font-bold text-base mb-2">[동의 및 교부확인]</h3>
-                  <p className="mb-1">1) 임금 산정방식 및 지급방법의 결정에 동의합니다.</p>
-                  <p className="mb-1">2) 퇴사 시 잔여 임금 및 퇴직금 등은 최초 도래하는 당사 임금지급일에 지급한는 것에 동의합니다.</p>
-                  <p className="pl-4 mb-1"> (1) 임금 지급일 : 매월 초일부터 말일까지의 임금을 익월 15일 지급</p>
-                  <p className="pl-4 mb-4"> (2) 퇴직연금 부담금 납입일 : 매월 초일부터 말일까지의 임금에 대한 부담금을 익월 25일 납입</p>
-                  <div className="text-left mt-4 border-t border-gray-200 print:border-black pt-4 flex items-center justify-between">
-                    <div>
-                      <span className="mr-2">근로자 :</span>
-                      <span className="inline-block min-w-[60px] text-center font-bold">{formData.empName}</span>
-                    </div>
-                    <span className="text-gray-400 text-sm relative inline-block mr-4">( 서명 또는 인 )
-                      {signatures.sign3 && <img src={signatures.sign3} className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-28 h-auto max-w-none object-contain mix-blend-multiply" alt="서명3"/>}
-                    </span>
-                  </div>
-                </div>
+                {/* ⭐ 3종 동의서 — ConsentDoc(모듈 스코프)이 조항템플릿 시트(consent1/2/3 키)를
+                     참조. 수정 탭에서 고르면 이 화면에서 바로 수정 가능(editingClauseNum 전달). */}
+                <ConsentDoc
+                  docIndex={0} formData={formData} clauses={clauses} variant="full"
+                  empName={formData.empName} signatureImg={signatures.sign1}
+                  editingClauseNum={(step === 1 && adminTab === '수정') ? editingClauseNum : null}
+                  editableTitleRef={editableTitleRef} editableBodyRef={editableBodyRef} draggedChipRef={draggedChipRef}
+                />
+                <ConsentDoc
+                  docIndex={1} formData={formData} clauses={clauses} variant="full"
+                  empName={formData.empName} signatureImg={signatures.sign2}
+                  editingClauseNum={(step === 1 && adminTab === '수정') ? editingClauseNum : null}
+                  editableTitleRef={editableTitleRef} editableBodyRef={editableBodyRef} draggedChipRef={draggedChipRef}
+                />
+                <ConsentDoc
+                  docIndex={2} formData={formData} clauses={clauses} variant="full"
+                  empName={formData.empName} signatureImg={signatures.sign3}
+                  editingClauseNum={(step === 1 && adminTab === '수정') ? editingClauseNum : null}
+                  editableTitleRef={editableTitleRef} editableBodyRef={editableBodyRef} draggedChipRef={draggedChipRef}
+                />
               </div>
 
               <div className="mt-12 mb-8 font-bold text-base break-keep leading-relaxed keep-together">
