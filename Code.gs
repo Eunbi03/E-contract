@@ -60,6 +60,9 @@ function sendBatchContracts(commonData, workerList) {
     var individualData = JSON.parse(JSON.stringify(commonData));
     individualData.contractPassword = worker.password;
     individualData.empName = worker.name;
+    // ⭐ 최종 승인(완료) 시 완료 안내를 어떤 방식으로 보낼지 판단할 수 있도록, 최초 발송 모드를
+    //   계약 데이터에도 같이 저장해둔다(approveContract에서 data.sendMode로 읽음).
+    individualData.sendMode = workerMode;
     // ⭐ 전화번호(=본인인증 비밀번호)를 근로자 정보 확인 단계의 "연락처"에도 그대로 채워준다.
     //   관리자가 발송 시 이미 입력한 값이므로 근로자가 또 입력할 필요가 없다(성명과 동일하게).
     individualData.empPhone = worker.password;
@@ -353,13 +356,23 @@ function approveContract(data) {
   expireDate.setMonth(expireDate.getMonth() + 3);
   var expireDateStr = Utilities.formatDate(expireDate, "Asia/Seoul", "yyyy년 MM월 dd일");
 
-  // ⭐ 계약 완료 메세지 문구
-  //   시트 커밋(승인 자체)은 위에서 이미 끝났으므로, 메일 발송만 실패해도(한도 초과, 잘못된
-  //   주소 등) 승인 전체가 실패한 것처럼 클라이언트에 에러가 전달되지 않도록 별도로 감싼다.
+  // ⭐ 계약 완료 안내 — 최초 발송(sendBatchContracts) 때 이 근로자에게 썼던 방식(문자/이메일)과
+  //   동일한 방식으로 보낸다(data.sendMode, sendBatchContracts에서 계약 데이터에 같이 저장해둠).
+  //   예전 데이터(sendMode 없음)는 이메일 주소가 있으면 이메일로 대체 발송한다.
+  //   시트 커밋(승인 자체)은 위에서 이미 끝났으므로, 발송만 실패해도(한도 초과, 잘못된
+  //   주소/번호 등) 승인 전체가 실패한 것처럼 클라이언트에 에러가 전달되지 않도록 별도로 감싼다.
   //   (클라이언트에 withFailureHandler가 붙어 있어, 여기서 그냥 던지면 이미 완료된 승인을
   //   "실패"로 오인하고 관리자가 재승인을 시도할 수 있다.)
-  if (data.workerContactEmail) {
-    try {
+  var completionMode = data.sendMode || (data.workerContactEmail ? 'email' : 'sms');
+  try {
+    if (completionMode === 'sms') {
+      var smsBody = data.companyName + " 근로계약 체결이 완료되었습니다.\n" +
+        "아래 링크에서 [인쇄 및 PDF 저장]으로 최종 계약서를 받아 보관해 주세요.\n" +
+        viewLink + "\n" +
+        "(다운로드 가능 기간: ~" + expireDateStr + ")\n" +
+        "담당자: " + (data.managerName || "") + " " + (data.managerPhone || "");
+      sendSolapiMessage(data.empPhone, data.managerPhone || '0333400023', smsBody);
+    } else if (data.workerContactEmail) {
       MailApp.sendEmail({
         to: data.workerContactEmail,
         subject: "[계약완료] " + data.companyName + " 근로계약서 체결 완료 및 다운로드 안내",
@@ -371,9 +384,9 @@ function approveContract(data) {
           "담당자: " + (data.managerName || "") + "\n전화번호: " + (data.managerPhone || "") + "\n이메일: " + (data.managerEmail || "") + "\n\n" +
           "감사합니다."
       });
-    } catch (e) {
-      Logger.log('완료 안내 메일 발송 실패(' + data.workerContactEmail + '): ' + e);
     }
+  } catch (e) {
+    Logger.log('완료 안내 발송 실패(' + completionMode + ', ' + (data.empPhone || data.workerContactEmail) + '): ' + e);
   }
   return "Approved";
 }
