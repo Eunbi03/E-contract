@@ -665,47 +665,45 @@ function substituteMessageVariables(template, data) {
   });
 }
 
-// ⭐ 직인 이미지: Drive에 "전자근로계약_직인" 폴더를 만들고, 그 안에 "회사설정" 시트의 법인명과
-//   정확히 같은 파일명(예: "(주)케이프라이드.png")으로 이미지를 올려두면 자동으로 매칭된다.
-//   (예전 Seals.html 방식은 회사명 표기가 서로 달라 매칭이 안 되고, Index.html에 포함되지도 않아
-//   직인이 아예 찍히지 않는 상태였다 — 이 방식으로 대체한다.)
+// ⭐ 직인 이미지: Drive 폴더 매칭 방식(파일명이 "회사설정" 시트의 법인명과 정확히 같아야 함)은
+//   폐기했다 — Drive 쪽 "전자근로계약_직인" 폴더가 아예 없거나 파일이 없으면 승인 시 조용히
+//   실패해서 직인이 안 찍히는 문제가 반복됐다. 대신 프로젝트에 있는 Seal.html 파일 안의
+//   `const sealImages = { '법인명': 'data:image/...;base64,...', ... }` 객체를 코드에서 직접
+//   읽어서 반환한다 — Drive 접근 자체가 필요 없다.
 //   getConfig()처럼 전체를 다 내려주지 않고 요청한 법인 한 곳의 이미지만 반환한다 — 관리자가
 //   최종 승인한 뒤에만(Index.html 쪽에서 그 시점에만 호출) 실제로 쓰인다.
-// ⭐ 예전엔 실패를 전부 빈 문자열('')로만 돌려줘서, 클라이언트는 "직인이 없다"와
-//   "폴더가 없다"와 "파일명이 안 맞는다"와 "읽기 실패"를 구분할 방법이 없었다 —
-//   그래서 승인 시 직인이 안 찍혀도 화면에 아무 표시도 없이 조용히 넘어갔다.
-//   이제 { dataUrl, status, message } 형태로 돌려줘서 managerApprove()가 이유를
-//   그대로 관리자에게 alert로 보여줄 수 있다. status: 'ok' | 'no_folder' | 'no_match' | 'error'
+//   { dataUrl, status, message } 형태로 돌려줘서 managerApprove()가 실패 이유를 관리자에게
+//   alert로 보여줄 수 있다. status: 'ok' | 'no_match' | 'error'
+function getSealImagesMap_() {
+  var html = HtmlService.createHtmlOutputFromFile('Seal').getContent();
+  var match = html.match(/const\s+sealImages\s*=\s*(\{[\s\S]*?\n\s*\});/);
+  if (!match) {
+    throw new Error('Seal.html에서 "const sealImages = { ... };" 형태의 객체를 찾을 수 없습니다.');
+  }
+  try {
+    // eslint-disable-next-line no-eval
+    return eval('(' + match[1] + ')');
+  } catch (e) {
+    throw new Error('Seal.html의 sealImages 객체 문법이 잘못되었습니다: ' + e);
+  }
+}
+
 function getSealImage(companyName) {
-  var folders = DriveApp.getFoldersByName('전자근로계약_직인');
-  if (!folders.hasNext()) {
-    return { dataUrl: '', status: 'no_folder', message: 'Drive에 "전자근로계약_직인" 폴더가 없습니다.' };
+  var map;
+  try {
+    map = getSealImagesMap_();
+  } catch (e) {
+    Logger.log('직인 이미지 맵 로드 실패: ' + e);
+    return { dataUrl: '', status: 'error', message: String(e) };
   }
-  var folder = folders.next();
-  var extensions = ['png', 'jpg', 'jpeg'];
-  for (var i = 0; i < extensions.length; i++) {
-    var files = folder.getFilesByName(companyName + '.' + extensions[i]);
-    if (files.hasNext()) {
-      try {
-        var blob = files.next().getBlob();
-        return { dataUrl: 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes()), status: 'ok' };
-      } catch (e) {
-        Logger.log('직인 이미지 로드 실패(' + companyName + '): ' + e);
-        return { dataUrl: '', status: 'error', message: '직인 이미지 파일을 읽는 중 오류: ' + e };
-      }
-    }
+  var dataUrl = map[companyName];
+  if (!dataUrl) {
+    return {
+      dataUrl: '', status: 'no_match',
+      message: '"' + companyName + '"에 해당하는 직인 이미지가 Seal.html의 sealImages에 없습니다. 등록된 법인명: ' + (Object.keys(map).join(', ') || '(없음)')
+    };
   }
-  // ⭐ 폴더는 있지만 이 법인명과 정확히 일치하는 파일(.png/.jpg/.jpeg)이 없음 — 폴더 안에
-  //   실제로 뭐가 들어있는지 같이 돌려줘서 "(주)" vs "㈜" 같은 표기 차이를 바로 비교하게 한다.
-  var existingNames = [];
-  var allFiles = folder.getFiles();
-  while (allFiles.hasNext() && existingNames.length < 20) {
-    existingNames.push(allFiles.next().getName());
-  }
-  return {
-    dataUrl: '', status: 'no_match',
-    message: '"' + companyName + '.png(or .jpg/.jpeg)"와 정확히 일치하는 파일이 폴더에 없습니다. 폴더 안 파일: ' + (existingNames.join(', ') || '(비어있음)')
-  };
+  return { dataUrl: dataUrl, status: 'ok' };
 }
 
 // ⭐ Solapi API 자격증명 — 코드에 직접 적지 않고 스크립트 속성에서 읽는다.
