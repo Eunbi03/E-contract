@@ -42,7 +42,9 @@ function sendBatchContracts(commonData, workerList) {
 
   var queueSheet = ss.getSheetByName('발송큐') || ss.insertSheet('발송큐');
   if (queueSheet.getLastRow() === 0) {
-    queueSheet.appendRow(['ID', '성명', '이메일', '전화번호', '링크', '모드', '법인명', '담당자명', '담당자연락처', '담당자이메일', '상태', '생성시간']);
+    queueSheet.appendRow(['ID', '성명', '이메일', '전화번호', '링크', '모드', '법인명', '담당자명', '담당자연락처', '담당자이메일', '상태', '생성시간', '실패사유']);
+  } else {
+    ensureQueueFailReasonColumn(queueSheet);
   }
 
   var urlBase = ScriptApp.getService().getUrl();
@@ -117,8 +119,10 @@ function processSendQueue() {
     var sheet = ss.getSheetByName('발송큐');
     if (!sheet) return { sentCount: 0, failCount: 0 };
 
+    ensureQueueFailReasonColumn(sheet);
     var data = sheet.getDataRange().getValues();
     var statusCol = 10; // '상태' 열 (0-based)
+    var failReasonCol = data[0].indexOf('실패사유'); // 0-based, 헤더에서 위치 조회
 
     // ⭐ 대기열을 앞에서부터 훑을 때, 이메일 한도가 소진돼 이번 회차에 못 보낼 이메일 건은
     //   건너뛰고 계속 다음 후보를 찾는다 — 그래야 뒤쪽에 있는 SMS 건(이메일 한도와 무관)이
@@ -154,6 +158,7 @@ function processSendQueue() {
       var messageBody = substituteMessageVariables(messageTemplate.body, msgVars);
 
       var newStatus = 'SENT';
+      var failReason = '';
       try {
         if (rowMode === 'email') {
           MailApp.sendEmail({
@@ -169,10 +174,15 @@ function processSendQueue() {
       } catch (e) {
         Logger.log('발송 실패 (' + name + '): ' + e);
         newStatus = 'FAILED';
+        failReason = (e && e.message) ? e.message : String(e);
         failCount++;
       }
       data[rowIdx][statusCol] = newStatus;
       sheet.getRange(rowIdx + 1, statusCol + 1).setValue(newStatus);
+      // ⭐ 실패 사유를 시트에 직접 남겨서, 실행 기록(로그)까지 안 가도 '발송큐' 시트만 보고 원인을 알 수 있게 한다.
+      if (failReasonCol >= 0) {
+        sheet.getRange(rowIdx + 1, failReasonCol + 1).setValue(failReason);
+      }
     }
 
     var stillPending = false;
@@ -185,6 +195,15 @@ function processSendQueue() {
 
     return { sentCount: sentCount, failCount: failCount };
   });
+}
+
+// ⭐ 예전에 만들어진 '발송큐' 시트에는 '실패사유' 열이 없을 수 있어, 없으면 헤더 끝에 추가해준다.
+function ensureQueueFailReasonColumn(sheet) {
+  var lastCol = sheet.getLastColumn();
+  var header = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+  if (header.indexOf('실패사유') === -1) {
+    sheet.getRange(1, lastCol + 1).setValue('실패사유');
+  }
 }
 
 // ⭐ processSendQueue용 1회성 트리거가 이미 예약돼 있으면 중복 예약하지 않는다
