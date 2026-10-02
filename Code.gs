@@ -667,7 +667,7 @@ function substituteMessageVariables(template, data) {
 
 // ⭐ 직인 이미지: Drive 폴더 매칭 방식(파일명이 "회사설정" 시트의 법인명과 정확히 같아야 함)은
 //   폐기했다 — Drive 쪽 "전자근로계약_직인" 폴더가 아예 없거나 파일이 없으면 승인 시 조용히
-//   실패해서 직인이 안 찍히는 문제가 반복됐다. 대신 프로젝트에 있는 Seal.html 파일 안의
+//   실패해서 직인이 안 찍히는 문제가 반복됐다. 대신 프로젝트에 있는 Seals.html 파일 안의
 //   `const sealImages = { '법인명': 'data:image/...;base64,...', ... }` 객체를 코드에서 직접
 //   읽어서 반환한다 — Drive 접근 자체가 필요 없다.
 //   getConfig()처럼 전체를 다 내려주지 않고 요청한 법인 한 곳의 이미지만 반환한다 — 관리자가
@@ -675,16 +675,16 @@ function substituteMessageVariables(template, data) {
 //   { dataUrl, status, message } 형태로 돌려줘서 managerApprove()가 실패 이유를 관리자에게
 //   alert로 보여줄 수 있다. status: 'ok' | 'no_match' | 'error'
 function getSealImagesMap_() {
-  var html = HtmlService.createHtmlOutputFromFile('Seal').getContent();
+  var html = HtmlService.createHtmlOutputFromFile('Seals').getContent();
   var match = html.match(/const\s+sealImages\s*=\s*(\{[\s\S]*?\n\s*\});/);
   if (!match) {
-    throw new Error('Seal.html에서 "const sealImages = { ... };" 형태의 객체를 찾을 수 없습니다.');
+    throw new Error('Seals.html에서 "const sealImages = { ... };" 형태의 객체를 찾을 수 없습니다.');
   }
   try {
     // eslint-disable-next-line no-eval
     return eval('(' + match[1] + ')');
   } catch (e) {
-    throw new Error('Seal.html의 sealImages 객체 문법이 잘못되었습니다: ' + e);
+    throw new Error('Seals.html의 sealImages 객체 문법이 잘못되었습니다: ' + e);
   }
 }
 
@@ -700,7 +700,7 @@ function getSealImage(companyName) {
   if (!dataUrl) {
     return {
       dataUrl: '', status: 'no_match',
-      message: '"' + companyName + '"에 해당하는 직인 이미지가 Seal.html의 sealImages에 없습니다. 등록된 법인명: ' + (Object.keys(map).join(', ') || '(없음)')
+      message: '"' + companyName + '"에 해당하는 직인 이미지가 Seals.html의 sealImages에 없습니다. 등록된 법인명: ' + (Object.keys(map).join(', ') || '(없음)')
     };
   }
   return { dataUrl: dataUrl, status: 'ok' };
