@@ -1,0 +1,1943 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>전자 근로 계약서</title>
+<script crossorigin src="https://unpkg.com/react@17/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<style>
+  /* 텍스트 스타일 */
+  body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; background-color: #f3f4f6; margin: 0; }
+  
+  /* PC 환경 레이아웃 */
+  @media (min-width: 769px) {
+    .sidebar { width: 450px; background: white; border-right: 1px solid #ddd; height: 100vh; position: fixed; left: 0; top: 0; overflow-y: auto; padding: 24px; z-index: 10; }
+    .main-preview.has-sidebar { margin-left: 450px; }
+  }
+
+  /* 모바일 환경 레이아웃 */
+  @media screen and (max-width: 768px) {
+    .sidebar { width: 100%; background: white; height: auto; position: relative; padding: 16px; border-bottom: 1px solid #ddd; z-index: 10; }
+    .main-preview { margin-left: 0 !important; padding: 10px !important; }
+    .mobile-scale { zoom: 0.45; -moz-transform: scale(0.45); -moz-transform-origin: top center; }
+  }
+
+   /* 미리보기 화면 */
+  .main-preview { display: flex; justify-content: center; padding: 20px; box-sizing: border-x: auto; }
+  .a4-page { width: 210mm; min-height: 297mm; padding: 15mm; background: white; box-shadow: 0 0 10px rgba(0,0,0,0.1); font-size: 14px; line-height: 1.5; color: black; box-sizing: border-box; flex-shrink: 0; }
+  
+  /* 공통 테이블 스타일 */
+  .c-table { width: 100%; border-collapse: collapse; border: 1.5px solid black; }
+  .c-table td, .c-table th { border: 1px solid black; padding: 8px; }
+  .bg-gray-label { background-color: #eeeeee; text-align: center; font-weight: bold; }
+  
+  /* 서명 패드 */
+  canvas { touch-action: none; border: 2px solid #cbd5e1; border-radius: 0.5rem; background: #fff; }
+  
+  /* 인쇄(PDF 변환) 설정 */
+  @media print {
+    @page { size: A4; margin: 10mm; }
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    html, body, #root { width: 100% !important; height: auto !important; display: block !important; margin: 0 !important; padding: 0 !important; background-color: white !important; }
+    body, html, .overflow-y-auto, .overflow-auto { overflow: visible !important; height: auto !important; }
+    body * { visibility: hidden; }
+    #print-area, #print-area * { visibility: visible; }
+    #print-area { position: absolute; top: 0; left: 0; width: 100%; margin: 0 !important; padding: 0 !important; display: block !important; }
+    .a4-page { width: 100% !important; min-height: auto !important; margin: 0 !important; padding: 0 !important; box-shadow: none !important; border: none !important; transform: none !important; zoom: 1 !important; }
+    .print-hidden { display: none !important; }
+    ::-webkit-scrollbar { display: none !important; }
+    .c-table { width: 100% !important; page-break-inside: auto; }
+    tr { page-break-inside: avoid; page-break-after: auto; }
+    .keep-together { page-break-inside: avoid !important; break-inside: avoid !important; }
+  }
+</style>
+</head>
+
+<body>
+<input type="hidden" id="data-contract-id" value="<?= contractId ?>" />
+<input type="hidden" id="data-view-mode" value="<?= viewMode ?>" />
+<div id="root"></div>
+
+<script type="text/babel">
+  const { useState, useRef, useEffect } = React;
+
+  // 아이콘
+  const IconBase = ({ children, className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`inline-block ${className || ''}`}>{children}</svg>);
+  const Lock = ({ className }) => <IconBase className={className}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></IconBase>;
+  const CheckCircle = ({ className }) => <IconBase className={className}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></IconBase>;
+  const PenTool = ({ className }) => <IconBase className={className}><path d="M12 19l7-7 3 3-7 7-3-3z"></path><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path><path d="M2 2l7.586 7.586"></path><circle cx="11" cy="11" r="2"></circle></IconBase>;
+  const Send = ({ className }) => <IconBase className={className}><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></IconBase>;
+  const Printer = ({ className }) => <IconBase className={className}><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2-2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></IconBase>;
+  const Eraser = ({ className }) => <IconBase className={className}><path d="M2.9 15.8a1 1 0 0 0-.9 1.2l2.5 9A1 1 0 0 0 5.6 27h12.8a1 1 0 0 0 1-1l2.5-9a1 1 0 0 0-.9-1.2c-1.1-.3-2.3-.5-3.5-.5s-2.4.2-3.5.5c-1.1.3-2.3.5-3.5.5s-2.4-.2-3.5-.5z" transform="translate(-2 -2) scale(0.9)"/></IconBase>;
+  const ChevronRight = ({ className }) => <IconBase className={className}><polyline points="9 18 15 12 9 6"></polyline></IconBase>;
+
+  // ⭐ 계약일 표기 — ContractArticles(아래, App 바깥에 정의됨)에서도 쓰기 때문에 App 안이 아니라
+  //   여기(모듈 스코프)로 옮겨뒀다. App 내부에서 쓰던 곳들도 그대로 이 함수를 참조한다.
+  const formatDate = (d) => {
+    if (!d) return "      년      월      일";
+    let s = d;
+    if (typeof d === 'object') {
+      if (d.toISOString) s = d.toISOString().split('T')[0];
+      else return String(d);
+    }
+    const p = String(s).split('-');
+    if (p.length < 3) return s;
+    return `${p[0]}년 ${p[1]}월 ${p[2]}일`;
+  };
+
+  // ⭐ 수정 탭에서 조항 본문에 끌어다 넣을 수 있는 변수 블록 목록. token은 실제 formData 필드명,
+  //   label은 관리자 화면/칩에 보이는 직관적인 한글 이름이다. 조항 본문 저장값 안에서는
+  //   {{token}} 형태로 들어가 있다가, 실제 계약서를 그릴 때 formData 값으로 치환된다.
+  const VARIABLE_FIELDS = [
+    { token: 'companyName', label: '회사명' },
+    { token: 'workPlace', label: '근무장소' },
+    { token: 'duties', label: '담당업무' },
+    { token: 'empName', label: '근로자성명' },
+  ];
+
+  // ⭐ 조항 본문에 들어있는 {{token}} 자리표시자를 실제 값으로 바꾼다. 본문 자체(관리자가 수정
+  //   탭에서 입력한 HTML, <br/> 등)는 그대로 신뢰하지만, 치환되는 값(근무장소 등 계약마다 달라지는
+  //   자유 입력값)은 HTML로 잘못 해석되지 않도록 이스케이프한다.
+  const escapeHtmlValue = (str) => String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const substituteVariables = (template, formData) => {
+    if (!template) return '';
+    return template.replace(/\{\{(\w+)\}\}/g, (_, token) => {
+      const val = formData ? formData[token] : undefined;
+      return (val === undefined || val === null || val === '') ? '' : escapeHtmlValue(val);
+    });
+  };
+
+  // ⭐ 조항 번호 하나를 받아 {title, html}을 돌려주는 범용 헬퍼. ContractArticles(최종
+  //   미리보기/워커10단계)와 근로자 단계별 확인화면(2~6단계)이 보여주는 틀(h3+p vs
+  //   strong+div)은 서로 다르지만, 실제로 가져오는 title/본문 데이터는 이 함수 하나로만
+  //   거치게 해서 "수정 탭에서 바꾸면 어디서든 똑같이 보인다"를 보장한다.
+  const resolveClause = (num, fallbackTitle, fallbackBody, formData, clauses) => {
+    const c = clauses && clauses[String(num)];
+    const title = c ? c.title : fallbackTitle;
+    const html = substituteVariables(c ? c.body : fallbackBody, formData);
+    return { title, html };
+  };
+
+  // ⭐ 수정 탭에서 실제로 고칠 수 있는 조항/문서 목록. 제2·6조는 체크박스/표 구조라 제외.
+  //   consent1/2/3은 조번호가 아니라 근로자 서명 단계(7·8·9단계)에 쓰이는 3종 동의서 —
+  //   조항템플릿 시트를 그대로 재사용하되 문자열 키만 다르게 쓴다.
+  const EDITABLE_CLAUSE_NUMS = ['1', '3', '4', '5', '7', '8', '9', '10', '11', 'consent1', 'consent2', 'consent3'];
+  // ⭐ 수정 탭 선택 버튼에 표시할 이름 — 숫자 조항은 "제N조", 동의서는 짧은 이름을 따로 둔다.
+  const CLAUSE_SELECTOR_LABELS = {
+    consent1: '전자계약 동의서',
+    consent2: '연장·야간·휴일 동의서',
+    consent3: '교부확인',
+  };
+  const clauseSelectorLabel = (num) => CLAUSE_SELECTOR_LABELS[num] || `제${num}조`;
+
+  // ⭐ 변수 칩 하나의 HTML. 자리표시자 → 칩으로 바꿔 보여줄 때(templateToEditorHtml)와
+  //   본문에 새 칩을 끌어다 놓을 때(insertVariableChipAtCaret)가 모두 이 함수를 쓴다.
+  const buildChipHtml = (token, label) =>
+    `<span contenteditable="false" data-token="${token}" class="inline-flex items-center gap-1 bg-blue-100 text-blue-800 text-xs font-bold px-2 py-0.5 rounded-full mx-0.5 align-middle">${escapeHtmlValue(label)}<button type="button" class="chip-delete ml-0.5 text-blue-500 hover:text-red-600" aria-label="삭제">×</button></span>`;
+
+  // ⭐ 저장된 본문({{token}} 자리표시자가 섞인 일반 텍스트/HTML)을 계약서 본문 위에서 직접
+  //   수정할 때 보여줄 형태로 바꾼다. {{token}} 자리를 "칩"(삭제 버튼이 달린 변수 블록)으로.
+  //   fields는 어떤 변수 목록 중에서 라벨을 찾을지(조항 편집=VARIABLE_FIELDS, 발송
+  //   메시지 편집=MESSAGE_VARIABLE_FIELDS) — 기본값은 조항 편집 쪽과 호환되게 유지한다.
+  const templateToEditorHtml = (template, fields = VARIABLE_FIELDS) => {
+    if (!template) return '';
+    return template.replace(/\{\{(\w+)\}\}/g, (_, token) => {
+      const field = fields.find(v => v.token === token);
+      return buildChipHtml(token, field ? field.label : token);
+    });
+  };
+
+  // ⭐ 에디터의 현재 DOM(텍스트 + 칩 span)을 저장용 문자열로 되돌린다 — 칩은 다시 {{token}}으로.
+  const serializeEditorHtml = (rootEl) => {
+    const clone = rootEl.cloneNode(true);
+    clone.querySelectorAll('[data-token]').forEach(chip => {
+      chip.replaceWith(document.createTextNode('{{' + chip.getAttribute('data-token') + '}}'));
+    });
+    return clone.innerHTML;
+  };
+
+  // ⭐ 수정 탭(조항 본문 — 계약서 쪽)과 설정 탭(발송 메시지)이 공유하는 드래그앤드롭/칩
+  //   핸들러들. 어느 쪽이든 "사이드바의 변수 블록을 끌어다 본문에 놓는다"는 동작이 같아서
+  //   모듈 스코프에 둔다. draggedChipRef는 각 화면의 상위 컴포넌트가 만들어 내려준다.
+  const insertVariableChipAtCaret = (field) => {
+    document.execCommand('insertHTML', false, buildChipHtml(field.token, field.label));
+  };
+  const handleEditableBodyDrop = (e, draggedChipRef, fields = VARIABLE_FIELDS) => {
+    e.preventDefault();
+    const token = e.dataTransfer.getData('text/x-variable-token');
+    if (token) {
+      const field = fields.find(v => v.token === token);
+      if (field) insertVariableChipAtCaret(field);
+    }
+    if (draggedChipRef) draggedChipRef.current = null;
+  };
+  const handleEditableBodyDragStart = (e, draggedChipRef) => {
+    const chip = e.target.closest && e.target.closest('[data-token]');
+    if (chip && draggedChipRef) { draggedChipRef.current = chip; e.dataTransfer.setData('text/x-existing-chip', '1'); }
+  };
+  const handleEditableBodyClick = (e) => {
+    const delBtn = e.target.closest && e.target.closest('.chip-delete');
+    if (delBtn) {
+      const chip = delBtn.closest('[data-token]');
+      if (chip) chip.remove();
+    }
+  };
+
+  // ⭐ 발송 메시지(이메일/문자 공용) 편집 — 조항 본문과 달리 저장되는 값이 HTML이 아니라
+  //   실제 메일/문자에 그대로 들어가는 "순수 텍스트"(줄바꿈은 \n)라서, 조항 편집의
+  //   templateToEditorHtml/serializeEditorHtml을 그대로 쓸 수 없고 별도 변환이 필요하다.
+  const MESSAGE_VARIABLE_FIELDS = [
+    { token: 'workerName', label: '근로자성명' },
+    { token: 'companyName', label: '법인명' },
+    { token: 'link', label: '접속링크' },
+    { token: 'managerName', label: '담당자명' },
+    { token: 'managerPhone', label: '담당자연락처' },
+    { token: 'managerEmail', label: '담당자이메일' },
+  ];
+  // ⭐ 순수 텍스트 템플릿 → 에디터용 HTML. \n은 <br/>로, {{token}}은 칩으로. 원문 중 &<> 같은
+  //   문자가 있어도 깨지지 않도록 먼저 이스케이프한 뒤 줄바꿈/칩 변환을 적용한다.
+  const messageTemplateToEditorHtml = (template, fields) => {
+    if (!template) return '';
+    const withBreaks = escapeHtmlValue(template).replace(/\n/g, '<br/>');
+    return withBreaks.replace(/\{\{(\w+)\}\}/g, (_, token) => {
+      const field = fields.find(v => v.token === token);
+      return buildChipHtml(token, field ? field.label : token);
+    });
+  };
+  // ⭐ Enter를 누르면 브라우저마다 제각각(<div>/<p>)으로 줄을 나누는 대신, 항상 <br>
+  //   하나만 삽입하도록 강제한다 — 그래야 아래 serializeMessageBody가 줄바꿈을 안정적으로
+  //   \n 하나로 되돌릴 수 있다.
+  const handleMessageBodyKeyDown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); document.execCommand('insertLineBreak'); }
+  };
+  // ⭐ 에디터 DOM → 저장용 순수 텍스트. 칩은 {{token}}으로, <br>은 \n으로 되돌린 뒤
+  //   textContent로 나머지(일반 텍스트)를 그대로 가져온다.
+  const serializeMessageBody = (rootEl) => {
+    const clone = rootEl.cloneNode(true);
+    clone.querySelectorAll('[data-token]').forEach(chip => {
+      chip.replaceWith(document.createTextNode('{{' + chip.getAttribute('data-token') + '}}'));
+    });
+    clone.querySelectorAll('br').forEach(br => br.replaceWith(document.createTextNode('\n')));
+    return clone.textContent;
+  };
+
+  // ⭐ 제1조~제11조 본문 — 예전에는 workerStep===10(근로자 최종 확인 화면)과 최종 미리보기/인쇄
+  //   화면에 이 조항 전체가 거의 그대로 두 번 복붙돼 있었다(코드리뷰 지적사항). 문구를 손으로
+  //   옮겨 적을 때 실제로 두 군데 사이에 미세한 표기 차이가 이미 생겨 있었는데(아래 참고),
+  //   이제 이 컴포넌트 하나로 합쳐서 앞으로는 문구를 고칠 곳이 한 곳뿐이도록 정리했다.
+  //   래퍼(줄간격 등 CSS)만 호출하는 쪽에서 이전과 동일하게 유지하도록 className을 그대로 받는다.
+  //   ※ 실제 문구 자체는 바꾸지 않았고, 두 사본 사이에 이미 있던 아래 두 군데의 사소한 불일치만
+  //   이 파일 다른 곳(예: workerStep===2의 세 번째 사본)과 같은 쪽으로 맞췄다:
+  //   - "1개월 단위기간" (최종 미리보기에만 "단위 기간"으로 띄어져 있던 것)
+  //   - 수습 3항의 "채용일로부터 {개월}개월간" (최종 미리보기에만 괄호가 붙어 있던 것)
+  // ⭐ 완전 고정 조항(회사명/근무조건 등 가변값이 전혀 없는 제1·9·10·11조)은 "조항템플릿" 시트에서
+  //   불러온 문구가 있으면 그걸 쓰고, 없으면(아직 시트가 안 만들어졌거나 로드 전) 원래 하드코딩
+  //   문구를 그대로 보여준다 — 그래서 시트를 안 건드려도 지금과 완전히 똑같이 동작한다.
+  // ⭐ editingClauseNum이 넘어오면(관리자 수정 탭 전용 — 근로자 화면에는 절대 전달하지 않음)
+  //   해당 조항만 계약서 위에서 바로 글을 쓰는 느낌으로 contentEditable이 된다. 제목/본문
+  //   ref는 App에서 만들어 사이드바(ClauseEditorPanel)의 저장 버튼과 공유한다.
+  const ContractArticles = ({ formData, className, clauses, editingClauseNum, editableTitleRef, editableBodyRef, draggedChipRef }) => {
+    // ⭐ 조항 본문을 조항템플릿 시트 값(없으면 폴백 문구)으로 채우고, {{workPlace}} 같은
+    //   자리표시자는 실제 formData 값으로 치환해서 보여준다.
+    const clause = (num, fallbackTitle, fallbackBody) => {
+      const { title, html } = resolveClause(num, fallbackTitle, fallbackBody, formData, clauses);
+      if (String(num) === editingClauseNum) {
+        const savedBody = clauses && clauses[String(num)] ? clauses[String(num)].body : fallbackBody;
+        return (
+          <div className="keep-together -mx-2 px-2 py-1 bg-blue-50 ring-2 ring-blue-400 rounded">
+            <strong>제{num}조(
+              <span
+                ref={editableTitleRef}
+                contentEditable
+                suppressContentEditableWarning
+                className="inline-block min-w-[2em] outline-none border-b border-dashed border-blue-500"
+              >{title}</span>
+              )</strong><br/>
+            <div
+              ref={editableBodyRef}
+              contentEditable
+              suppressContentEditableWarning
+              dangerouslySetInnerHTML={{ __html: templateToEditorHtml(savedBody) }}
+              onClick={handleEditableBodyClick}
+              onDrop={e => handleEditableBodyDrop(e, draggedChipRef)}
+              onDragOver={e => e.preventDefault()}
+              onDragStart={e => handleEditableBodyDragStart(e, draggedChipRef)}
+              className="outline-none"
+            />
+          </div>
+        );
+      }
+      return <div className="keep-together"><strong>제{num}조({title})</strong><br/><span dangerouslySetInnerHTML={{ __html: html }} /></div>;
+    };
+    return (
+    <div className={className}>
+      {clause(1, '목적', '본 근로계약서는 "갑"과 "을"이 근로계약을 체결함에 있어 임금, 근로시간 등 근로조건을 정하는 것을 목적으로 한다.')}
+      <div className="keep-together"><strong>제2조(근로계약기간)</strong>
+        <table className="c-table mt-1 text-sm">
+          <tbody>
+            <tr><td className="pl-2 w-24 bg-gray-label">{formData.contractType === 'regular' ? '■' : '□'} 정규직</td><td className="pl-2">"갑"은 "을"을 기간의 정함이 없는 근로자로서 정년 시까지 고용을 보장한다. <br/>({formatDate(formData.startDate)} ~ 정년 시까지 고용 보장)</td></tr>
+            <tr><td className="pl-2 bg-gray-label">{formData.contractType === 'contract' ? '■' : '□'} 계약직</td><td className="pl-2">{formatDate(formData.startDate)} ~ {formatDate(formData.endDate)} <span className="ml-2">({formData.contractMonths === 'direct' ? '별도협의' : formData.contractMonths + ' 개월'})</span></td></tr>
+            <tr><td className="pl-2 bg-gray-label">{formData.useProbation ? '■' : '□'} 수습기간</td><td className="pl-2">1. 채용일로부터 {formData.probationMonths}개월간 1개월 단위기간으로 종료되는 수습및시용 기간으로 한다. 해당기간 동안 업무적격여부 판단에 따라 수습및시용 기간 중이라도 계약의 해지 또는 본채용을 거부할 수 있다.<br/>2. 업무적격여부 판단기준은 수습평가서에 의해 결정 한다.<br/>3. 본인은 '갑'의 관련규정에 의거 채용일로부터 {formData.probationMonths}개월간 수습및시용 근로자로서 임금을 하향하여 지급받음에 이의를 제기하지 아니한다.<br/>(기간: {formData.useProbation ? formatDate(formData.probationStartDate) + " ~ " + formatDate(formData.probationEndDate) : "      년      월      일 ~      년      월      일까지"} / 월 {formData.probationSalary || '별도 정함'}원)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      {clause(3, '근무장소', '"을"의 근무 장소는 {{workPlace}}(으)로 한다. 다만 "갑"은 인사명령에 의거 "을"의 근무 장소를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.')}
+      {clause(4, '담당업무', '"을"의 담당업무는 {{duties}}(으)로 한다. 다만, "갑"은 인사명령에 의거 "을"의 담당업무를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.')}
+      {clause(5, '임금', '(1) 임금형태 : "갑"과 "을"은 월급제로 임금계약을 체결한다. (기본급과 법정 제수당이 포함된 "포괄임금")<br/>(2) 임금내용 : 월급총액, 월급의 구성내역, 지급방법 등은 임금계약서에 의한다.<br/>(3) 사정변경 : "갑"은 계약기간 중 제반 경영여건상 처우조건이 불가피하거나, 인사상 처우조정 사유발생시에는 제반기준에 의거 임금을 조정할 수 있다.<br/>(4) 임금인상 : "갑"과 "을"은 근로계약기간이 종료되는 시점에서 업무상 필요성, "갑"의 경영사정에 의거 재계약을 체결할 시 상호 대등한 입장으로 임금인상 등을 협의할 수 있다. 다만 임금내용의 변동이 없는 경우, 또는 임금인상에 대한 합의가 성립 되지 않는 경우 이전과 동일한 금액으로 반복하여 체결하며 "을"은 이에 이의를 제기하지 않는다.<br/>(5) 임금산정일 및 지급일자 : 초일부터 말일까지 계산하여 익월 10일에 지급한다. (단 공휴일일경우에는 그 다음 영업일에 지급한다.)<br/>(6) 비밀유지 : 임금은 회사의 규정과 상사의 지시에 따른 본인의 근로제공에 대한 모든 금전적 보상임을 확인하며 직원상호간 비밀의무를 반드시 준수한다.')}
+
+      <div className="keep-together"><strong>제6조(근로시간 및 휴게시간)</strong><br/>
+        (1) "을"의 1주간, 1일의 소정근로시간, 휴게시간은 다음표와 같다. 단, 휴일은 회사 사정에 따라 근무할 수있고, 근로자는 정당한 사유없이 거부할 수 없다.<br/>
+        <table className="c-table mt-2 mb-2 text-center table-fixed text-sm">
+          <colgroup>
+            <col className="w-[20%]"/>
+            <col className="w-[48%]"/>
+            <col className="w-[32%]"/>
+          </colgroup>
+          <thead>
+            <tr>
+              <td className="bg-gray-label">1 주간</td>
+              <td className="bg-gray-label">근로시간(시업시각, 종업시각 등)</td>
+              <td className="bg-gray-label">휴게시간</td>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              {formData.isBiweekly ? (
+                <>
+                  <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleWeek}</td>
+                  <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleWork}</td>
+                  <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleBreak}</td>
+                </>
+              ) : (
+                <>
+                  <td className="text-center">{formData.weeklyWorkHours}시간</td>
+                  <td className="text-center">
+                    1일 {formData.dailyWorkHours}시간
+                    {formData.weeklyWorkDays !== '5' && ` 주 ${formData.weeklyWorkDays}일`}
+                    <br/>[ 시업 {formData.startTime} ~ 종업 {formData.endTime} ]
+                  </td>
+                  <td className="text-center">{formData.breakTimeMinutes}분 <br/>[ {formData.breakTimeStart}~{formData.breakTimeEnd} ]</td>
+                </>
+              )}
+            </tr>
+          </tbody>
+        </table>
+        * 업무상황 및 근무 여건에 따라 근로 시간 및 휴게시간은 조정 및 변경 될수 있다.<br/>
+        * 업무상황 및 경영사정에 따라 근무일은 교대제로 운영할 수 있다.<br/><br/>
+        (2) 시간외근로(연장.야간.휴일근로) : "갑"과"을"은 본 근로계약서 작성으로 회사의 업무 특성상 수반되는 고정적인 시간외근로가 필요한 경우 이에 임할 것을 합의하며, "갑"은 "을"의 임금(연봉월액) 지급시 이를 포함한 포괄임금제로 지급함에 있어 "을"은 이에 동의한다. (시간외수당 가산율은 통상시급의 100분의 50으로 한다)<br/>
+        (3) "을"은 고정적인 시간외근로외에 시간외 근로가 필요한 경우 "갑"에게 보고한 후 승인을 득하여야 하며, 승인을 득하지 아니한 시간외근로는 근로시간으로 보지 아니한다.
+      </div>
+      {clause(7, '휴일 및 휴가', '(1) 휴일 : 주휴일(1주간 소정근로일수 개근시 주1회), 근로자의 날, 관공서공휴일규정에 따른 공휴일과 대체공휴일<br/> ※ 업무 특성 상 특정 주에 변경되는 주휴일은 휴일변경(대체)하는 것이며, 근로자는 이에 동의한다.<br/>(2) 휴가 : 연차유급휴가는 "근로기준법"에 의한다. (1년간 80퍼센트 이상 출근한 근로자에게 15일 / 1년 미만 근로자의 경우 1개월 개근시 1일)<br/> ※ 근로자가 본인에게 발생한 연차유급휴가일수 보다 더 많은 연차휴가를 사용한 경우 이는 "사용자"가 "근로자"에게 향후 발생할 연차휴가를 선사용하도록 허용한 것이므로 "근로자"가 퇴사하는 경우 더 많이 사용한 연차휴가 일수만큼 임금을 공제할 수 있다.<br/> ※ 1주간 소정근로시간 15시간 미만인 자는 휴일 및 휴가 규정은 적용하지 아니한다. (근로자의 날 제외)')}
+      {clause(8, '근로계약의 종료 등', '(1) "을"이 정년에(만60세) 도달하거나 약정한 근로계약기간의 만료로 근로계약은 자동 종료된다.<br/>(2) 근로계약의 만료일이 지정된 경우 계약기간 만료시 본 계약은 자동해지 된다.<br/>(3) "갑"의 해지사유 : "갑"은 정년도래, 기간만료 이외 "갑"의 관련규정 등에서 정한 정당한 사유가 있는 경우에는 "을"의 의사에도 불구하고 근로계약을 해지할 수 있다. 다만, "갑"은 근로기준법에서 규정하고 있는 해고예고의 예외가 되는 근로자의 귀책사유 이외에는 해고예정일 30일전에 서면으로 통보해야 한다.<br/>(4) "을"의 해지사유 : "을"이 정년도래, 기간만료 이외 계약을 해지하고자 하는 경우에는 30일전에 "갑"에게 통보하여야 하고 후임자에게 업무의 인수인계를 하여야 하며, 이를 해태함으로 인하여 "갑"에게 손해가 발생하는 경우에는 이를 배상하여야 한다.')}
+      {clause(9, '의무', '"갑"은 "을"의 근무조건 향상을 위하여 최선을 다하여야 하며, "을"은 신의성실의 원칙에 의하여 근로를 제공하여야 한다. 특히 "을"은 "갑"이 정한 안전에 관한 제 규칙과 지시사항을 위반하여 발생한 제반사고는 "을"의 귀책사유로 한다.')}
+      {clause(10, '손해배상', '"을"이 계약기간 중 고의 또는 과실로 "갑"에게 손해를 입힌 때에는 이를 배상하여야 한다.')}
+      {clause(11, '기타 근로조건', '본 계약서를 작성함에 있어 "을"은 "갑"의 취업규칙 및 제 규정을 열람하였으며 이 계약에 정함이 없는 사항은 관계법령 및 "갑"의 취업규칙 등에 정한 바에 따르며 상기사실을 확실히 하기 위하여 본 계약서를 2통 작성하여 사용자와 근로자가 각 1통씩 보관키로 한다.')}
+    </div>
+    );
+  };
+
+  // ⭐ 근로자 서명 단계(7·8·9단계)의 동의서 3종 — 예전에는 근로자 단계별 화면과 최종
+  //   미리보기/인쇄 화면에 각각 복붙돼 있었고(코드리뷰에서 잡았던 ContractArticles 중복과
+  //   같은 패턴), 두 사본 사이에 "지급하는"/"지급한는" 같은 사소한 오타 차이도 있었다.
+  //   조항템플릿 시트(consent1/2/3 키)를 그대로 재사용해 수정 탭에서 편집 가능하게 하고,
+  //   ConsentDoc 하나로 합쳐 어디서든 같은 내용을 보여준다. 오타는 둘 중 맞는 표기
+  //   ("지급하는")로 통일했다.
+  const CONSENT_DOCS = [
+    { key: 'consent1', fallbackTitle: '전자근로계약 체결 동의서', fallbackBody: '1) 「전자문서 및 전자거래 기본법」 제4조 제1항에 따라, 본 근로계약서를 전자적 형태(URL 접속 및 전자서명)로 작성 및 체결하는 것에 동의합니다.<br/>2) 「전자서명법」 제3조 제1항 및 제2항에 따라, 본인이 등록한 전자서명이 자필 서명 또는 날인과 동일한 법적 효력을 가짐을 인정합니다.<br/>3) 「전자서명법」 제18조에 근거하여 본인 인증(휴대폰 번호 등)에 대한 관리 의무 및 보안 책임을 확인합니다.<br/>4) 「근로기준법」 제17조 제2항에 따라 근로계약서의 전자적 방법(이메일 또는 링크 등)을 통한 교부에 동의합니다.' },
+    { key: 'consent2', fallbackTitle: '연장/야간/휴일근로 동의서', fallbackBody: '1) 「근로기준법」 제53조(연장근로의 제한) 제1항에 따라 사업장의 업무상황 및 근무표 등에 의하여 요구되는 연장,야간,휴일 근로에 동의합니다.<br/>2) 「근로기준법」 제70조(야간근로와 휴일근로의 제한) 제1항 - 18세 이상 여성이 오후 10시부터 오전6시까지 근로 및 휴일근로에 동의합니다.' },
+    { key: 'consent3', fallbackTitle: '동의 및 교부확인', fallbackBody: '1) 임금 산정방식 및 지급방법의 결정에 동의합니다.<br/>2) 퇴사 시 잔여 임금 및 퇴직금 등은 최초 도래하는 당사 임금지급일에 지급하는 것에 동의합니다.<br/>(1) 임금 지급일 : 매월 초일부터 말일까지의 임금을 익월 15일 지급<br/>(2) 퇴직연금 부담금 납입일 : 매월 초일부터 말일까지의 임금에 대한 부담금을 익월 25일 납입' },
+  ];
+
+  // ⭐ variant="step": 근로자 서명 단계(7·8·9) — 파란 박스만, 서명줄 없음(서명 패드가 따로 아래 있음).
+  //   variant="full": 관리자 미리보기/최종 인쇄 — 서명줄(근로자명 + 서명 이미지) 포함.
+  //   editingClauseNum 등은 관리자의 수정 탭에서만 넘어오며(App에서 step/adminTab으로 게이팅),
+  //   근로자 화면(variant="step", workerStep10)에는 절대 전달하지 않아 편집 모드가 노출되지 않는다.
+  const ConsentDoc = ({ docIndex, formData, clauses, variant, empName, signatureImg, editingClauseNum, editableTitleRef, editableBodyRef, draggedChipRef }) => {
+    const doc = CONSENT_DOCS[docIndex];
+    const { title, html } = resolveClause(doc.key, doc.fallbackTitle, doc.fallbackBody, formData, clauses);
+    const isEditing = doc.key === editingClauseNum;
+
+    const titleClass = variant === 'full' ? 'font-bold text-base mb-2' : 'font-bold text-lg mb-2 text-blue-900';
+
+    const body = isEditing ? (
+      <div className="keep-together -mx-2 px-2 py-1 bg-blue-50 ring-2 ring-blue-400 rounded">
+        <h3 className={titleClass}>[
+          <span
+            ref={editableTitleRef}
+            contentEditable
+            suppressContentEditableWarning
+            className="inline-block min-w-[2em] outline-none border-b border-dashed border-blue-500"
+          >{title}</span>
+          ]</h3>
+        <div
+          ref={editableBodyRef}
+          contentEditable
+          suppressContentEditableWarning
+          dangerouslySetInnerHTML={{ __html: templateToEditorHtml((clauses && clauses[doc.key] ? clauses[doc.key].body : doc.fallbackBody)) }}
+          onClick={handleEditableBodyClick}
+          onDrop={e => handleEditableBodyDrop(e, draggedChipRef)}
+          onDragOver={e => e.preventDefault()}
+          onDragStart={e => handleEditableBodyDragStart(e, draggedChipRef)}
+          className="outline-none"
+        />
+      </div>
+    ) : (
+      <>
+        <h3 className={titleClass}>[{title}]</h3>
+        <span dangerouslySetInnerHTML={{ __html: html }} />
+      </>
+    );
+
+    if (variant === 'step') {
+      return <div className="border-2 border-blue-500 rounded-lg p-4 bg-blue-50">{body}</div>;
+    }
+
+    return (
+      <div className="border border-gray-400 rounded-lg p-4 print:border-black print:rounded-none keep-together">
+        {body}
+        <div className="text-left mt-4 border-t border-gray-200 print:border-black pt-4 flex items-center justify-between">
+          <div>
+            <span className="mr-2">근로자 :</span>
+            <span className="inline-block min-w-[70px] text-center font-bold">{empName}</span>
+          </div>
+          <span className="text-gray-400 text-sm relative inline-block mr-4">( 서명 또는 인 )
+            {signatureImg && <img src={signatureImg} className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-28 h-auto max-w-none object-contain mix-blend-multiply" alt="서명"/>}
+          </span>
+        </div>
+      </div>
+    );
+  };
+
+  // ⭐ 설정 탭 — 회사 추가/수정 폼 (회사설정 시트의 7개 필드 전부: 법인명 하나만 바뀌는 게 아니라
+  //   주소/대표자/담당자 정보도 함께 바뀔 수 있으므로 한 폼에서 같이 관리한다).
+  const CompanyEditForm = ({ draft, setDraft, onSave, onCancel, saving }) => (
+    <div className="p-3 bg-yellow-50 border border-yellow-300 rounded space-y-2">
+      <input className="w-full p-2 border rounded text-sm" placeholder="법인명" value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} />
+      <input className="w-full p-2 border rounded text-sm" placeholder="주소" value={draft.address} onChange={e => setDraft({ ...draft, address: e.target.value })} />
+      <input className="w-full p-2 border rounded text-sm" placeholder="전화번호 (예: T.033-644-4467 F.033-644-1944)" value={draft.phone} onChange={e => setDraft({ ...draft, phone: e.target.value })} />
+      <input className="w-full p-2 border rounded text-sm" placeholder="대표자" value={draft.rep} onChange={e => setDraft({ ...draft, rep: e.target.value })} />
+      <div className="grid grid-cols-3 gap-2">
+        <input className="p-2 border rounded text-sm" placeholder="담당자명" value={draft.managerName} onChange={e => setDraft({ ...draft, managerName: e.target.value })} />
+        <input className="p-2 border rounded text-sm" placeholder="담당자 연락처" value={draft.managerPhone} onChange={e => setDraft({ ...draft, managerPhone: e.target.value })} />
+        <input className="p-2 border rounded text-sm" placeholder="담당자 이메일" value={draft.managerEmail} onChange={e => setDraft({ ...draft, managerEmail: e.target.value })} />
+      </div>
+      <div className="flex gap-2 pt-1">
+        <button onClick={onSave} disabled={saving} className="flex-1 py-2 bg-blue-600 text-white rounded font-bold text-sm disabled:opacity-50">{saving ? '저장 중...' : '저장'}</button>
+        <button onClick={onCancel} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded font-bold text-sm">취소</button>
+      </div>
+    </div>
+  );
+
+  // ⭐ 설정 탭 본체 — 계약 법인(추가/수정/삭제)과 새 계약서 초기값을 관리자 화면에서 직접 관리.
+  //   App 안에 중첩해서 정의하면 App이 리렌더될 때마다(=다른 입력 하나만 바꿔도) 함수 참조가
+  //   매번 새로 생겨 React가 이 컴포넌트를 통째로 마운트 해제/재마운트해버린다 — 그러면 수정 중인
+  //   입력값이 전부 날아간다. 그래서 ContractArticles처럼 App 바깥(모듈 스코프)에 두고 필요한
+  //   값/상태변경 함수를 모두 props로 받는다.
+  const SettingsPanel = ({ companies, setCompanies, defaults, setDefaults }) => {
+    const [editingIdx, setEditingIdx] = useState(null); // 숫자(회사 인덱스) | 'new' | null
+    const [draft, setDraft] = useState(null);
+    const [savingCompany, setSavingCompany] = useState(false);
+    const [defaultsDraft, setDefaultsDraft] = useState(defaults);
+    const [savingDefaults, setSavingDefaults] = useState(false);
+
+    useEffect(() => { if (defaults) setDefaultsDraft(defaults); }, [defaults]);
+
+    const startEdit = (idx) => { setEditingIdx(idx); setDraft({ ...companies[idx] }); };
+    const startNew = () => { setEditingIdx('new'); setDraft({ name: '', address: '', phone: '', rep: '', managerName: '', managerPhone: '', managerEmail: '' }); };
+    const cancelEdit = () => { setEditingIdx(null); setDraft(null); };
+
+    const saveCompany = () => {
+      if (!draft.name.trim()) return alert('법인명을 입력해 주세요.');
+      const originalName = editingIdx === 'new' ? null : companies[editingIdx].name;
+      setSavingCompany(true);
+      google.script.run.withSuccessHandler(() => {
+        setSavingCompany(false);
+        const next = [...companies];
+        if (editingIdx === 'new') next.push(draft); else next[editingIdx] = draft;
+        setCompanies(next);
+        cancelEdit();
+      }).withFailureHandler(err => { setSavingCompany(false); alert('저장 실패: ' + err); }).upsertCompany(draft, originalName);
+    };
+
+    const removeCompany = (idx) => {
+      if (!confirm(`'${companies[idx].name}'을 삭제하시겠습니까?`)) return;
+      google.script.run.withSuccessHandler(() => {
+        setCompanies(companies.filter((_, i) => i !== idx));
+      }).withFailureHandler(err => alert('삭제 실패: ' + err)).deleteCompany(companies[idx].name);
+    };
+
+    const saveDefaultsNow = () => {
+      setSavingDefaults(true);
+      google.script.run.withSuccessHandler(() => {
+        setSavingDefaults(false);
+        setDefaults(defaultsDraft);
+        alert('기본값이 저장되었습니다.');
+      }).withFailureHandler(err => { setSavingDefaults(false); alert('저장 실패: ' + err); }).saveDefaults(defaultsDraft);
+    };
+
+    return (
+      <div className="space-y-8">
+        <div>
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="font-bold text-gray-800">계약 법인 관리</h3>
+            {editingIdx === null && <button onClick={startNew} className="text-blue-600 text-sm font-bold border border-blue-300 rounded px-3 py-1 hover:bg-blue-50">+ 법인 추가</button>}
+          </div>
+          <div className="space-y-2">
+            {companies.map((c, idx) => (
+              editingIdx === idx ? (
+                <CompanyEditForm key={idx} draft={draft} setDraft={setDraft} onSave={saveCompany} onCancel={cancelEdit} saving={savingCompany} />
+              ) : (
+                <div key={idx} className="p-3 bg-white border rounded flex justify-between items-start gap-2">
+                  <div className="text-sm">
+                    <div className="font-bold text-blue-900">{c.name}</div>
+                    <div className="text-gray-500">{c.address}</div>
+                    <div className="text-gray-500">{c.phone} · 대표 {c.rep}</div>
+                    <div className="text-gray-500">담당자 {c.managerName} · {c.managerPhone} · {c.managerEmail}</div>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <button onClick={() => startEdit(idx)} className="text-xs text-blue-600 font-bold">수정</button>
+                    <button onClick={() => removeCompany(idx)} className="text-xs text-red-500 font-bold">삭제</button>
+                  </div>
+                </div>
+              )
+            ))}
+            {editingIdx === 'new' && <CompanyEditForm draft={draft} setDraft={setDraft} onSave={saveCompany} onCancel={cancelEdit} saving={savingCompany} />}
+          </div>
+        </div>
+
+        <div className="border-t pt-6">
+          <h3 className="font-bold text-gray-800 mb-3">새 계약서 초기값</h3>
+          {!defaultsDraft ? (
+            <p className="text-sm text-gray-400">불러오는 중...</p>
+          ) : (
+            <div className="bg-blue-50 p-4 rounded border border-blue-200 space-y-3">
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1">근무장소</label>
+                <input className="w-full p-2 border rounded text-sm" value={defaultsDraft.workPlace} onChange={e => setDefaultsDraft({ ...defaultsDraft, workPlace: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1">담당업무</label>
+                <select className="w-full p-2 border rounded text-sm" value={defaultsDraft.duties} onChange={e => setDefaultsDraft({ ...defaultsDraft, duties: e.target.value })}>
+                  <option value="사무직">사무직</option><option value="영업직">영업직</option><option value="생산직">생산직</option>
+                </select>
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-xs font-bold text-gray-600 block mb-1">1일 근로시간</label>
+                  <input type="number" className="w-full p-2 border rounded text-sm" value={defaultsDraft.dailyWorkHours} onChange={e => setDefaultsDraft({ ...defaultsDraft, dailyWorkHours: e.target.value })} />
+                </div>
+                <div className="flex-1">
+                  <label className="text-xs font-bold text-gray-600 block mb-1">주 근무일수</label>
+                  <input type="number" className="w-full p-2 border rounded text-sm" value={defaultsDraft.weeklyWorkDays} onChange={e => setDefaultsDraft({ ...defaultsDraft, weeklyWorkDays: e.target.value })} />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-xs font-bold text-gray-600 block mb-1">시업</label>
+                  <input type="time" className="w-full p-2 border rounded text-sm" value={defaultsDraft.startTime} onChange={e => setDefaultsDraft({ ...defaultsDraft, startTime: e.target.value })} />
+                </div>
+                <div className="flex-1">
+                  <label className="text-xs font-bold text-gray-600 block mb-1">종업</label>
+                  <input type="time" className="w-full p-2 border rounded text-sm" value={defaultsDraft.endTime} onChange={e => setDefaultsDraft({ ...defaultsDraft, endTime: e.target.value })} />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-xs font-bold text-gray-600 block mb-1">휴게시간(분)</label>
+                  <input className="w-full p-2 border rounded text-sm" value={defaultsDraft.breakTimeMinutes} onChange={e => setDefaultsDraft({ ...defaultsDraft, breakTimeMinutes: e.target.value })} />
+                </div>
+                <div className="flex-1">
+                  <label className="text-xs font-bold text-gray-600 block mb-1">휴게 시작</label>
+                  <input type="time" className="w-full p-2 border rounded text-sm" value={defaultsDraft.breakTimeStart} onChange={e => setDefaultsDraft({ ...defaultsDraft, breakTimeStart: e.target.value })} />
+                </div>
+                <div className="flex-1">
+                  <label className="text-xs font-bold text-gray-600 block mb-1">휴게 종료</label>
+                  <input type="time" className="w-full p-2 border rounded text-sm" value={defaultsDraft.breakTimeEnd} onChange={e => setDefaultsDraft({ ...defaultsDraft, breakTimeEnd: e.target.value })} />
+                </div>
+              </div>
+              <button onClick={saveDefaultsNow} disabled={savingDefaults} className="w-full py-2 bg-blue-600 text-white rounded font-bold text-sm disabled:opacity-50">{savingDefaults ? '저장 중...' : '기본값 저장'}</button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // ⭐ 설정 탭 — 근로자에게 보내는 발송 메시지(이메일/문자 공용) 편집. 수정 탭의 조항 편집과
+  //   같은 "변수 블록을 끌어다 놓으면 칩으로 들어간다" 방식을 그대로 쓰지만, 저장되는 값이
+  //   HTML이 아니라 실제 메일/문자 본문에 바로 들어가는 순수 텍스트라서 변환 로직만 다르다
+  //   (messageTemplateToEditorHtml/serializeMessageBody, 모듈 스코프에 정의).
+  //   SettingsPanel과 같은 이유로 App 바깥(모듈 스코프)에 두고 상태를 props로 받는다.
+  const MessageTemplateEditor = ({ messageTemplate, setMessageTemplate }) => {
+    const [subject, setSubject] = useState(messageTemplate ? messageTemplate.subject : '');
+    const [saving, setSaving] = useState(false);
+    const bodyRef = useRef(null);
+    const draggedChipRef = useRef(null);
+
+    useEffect(() => { if (messageTemplate) setSubject(messageTemplate.subject); }, [messageTemplate]);
+
+    const handleDeleteZoneDragOver = (e) => { if (draggedChipRef.current) e.preventDefault(); };
+    const handleDeleteZoneDrop = (e) => {
+      if (draggedChipRef.current) {
+        e.preventDefault();
+        draggedChipRef.current.remove();
+        draggedChipRef.current = null;
+      }
+    };
+
+    const save = () => {
+      if (!bodyRef.current) return;
+      if (!subject.trim()) return alert('메일 제목을 입력해 주세요.');
+      const body = serializeMessageBody(bodyRef.current);
+      setSaving(true);
+      google.script.run.withSuccessHandler(() => {
+        setSaving(false);
+        setMessageTemplate({ subject, body });
+        alert('저장되었습니다.');
+      }).withFailureHandler(err => { setSaving(false); alert('저장 실패: ' + err); }).saveMessageTemplate(subject, body);
+    };
+
+    if (!messageTemplate) {
+      return (
+        <div className="border-t pt-6">
+          <h3 className="font-bold text-gray-800 mb-3">발송 메시지 (이메일·문자)</h3>
+          <p className="text-sm text-gray-400">불러오는 중...</p>
+        </div>
+      );
+    }
+
+    const initialBodyHtml = messageTemplateToEditorHtml(messageTemplate.body, MESSAGE_VARIABLE_FIELDS);
+
+    return (
+      <div className="border-t pt-6">
+        <h3 className="font-bold text-gray-800 mb-1">발송 메시지 (이메일·문자)</h3>
+        <p className="text-xs text-gray-400 mb-3">근로자에게 계약서를 보낼 때(작성 탭에서 이메일/문자 선택) 쓰이는 문구입니다. 문자는 제목 없이 본문만 전송됩니다.</p>
+
+        <div
+          onDragOver={handleDeleteZoneDragOver}
+          onDrop={handleDeleteZoneDrop}
+          className="p-3 bg-gray-50 border border-dashed border-gray-300 rounded mb-3"
+        >
+          <p className="text-xs font-bold text-gray-500 mb-2">변수 블록 — 끌어서 아래 본문에 놓으세요</p>
+          <div className="flex flex-wrap gap-1">
+            {MESSAGE_VARIABLE_FIELDS.map(f => (
+              <div
+                key={f.token}
+                draggable="true"
+                onDragStart={e => e.dataTransfer.setData('text/x-variable-token', f.token)}
+                className="px-2 py-1.5 bg-white border border-blue-200 rounded cursor-grab text-xs font-bold text-blue-700 hover:bg-blue-50"
+              >
+                {f.label}
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] text-gray-400 pt-2 leading-tight">칩 삭제: × 버튼 / 백스페이스 / 칩을 이 영역으로 끌어오기</p>
+        </div>
+
+        <label className="text-xs font-bold text-gray-600 block mb-1">메일 제목 (이메일에만 사용)</label>
+        <input className="w-full p-2 border rounded text-sm mb-3" value={subject} onChange={e => setSubject(e.target.value)} placeholder="메일 제목" />
+
+        <label className="text-xs font-bold text-gray-600 block mb-1">본문 (이메일 본문 · 문자 내용 공용)</label>
+        <div
+          ref={bodyRef}
+          contentEditable
+          suppressContentEditableWarning
+          dangerouslySetInnerHTML={{ __html: initialBodyHtml }}
+          onClick={handleEditableBodyClick}
+          onKeyDown={handleMessageBodyKeyDown}
+          onDrop={e => handleEditableBodyDrop(e, draggedChipRef, MESSAGE_VARIABLE_FIELDS)}
+          onDragOver={e => e.preventDefault()}
+          onDragStart={e => handleEditableBodyDragStart(e, draggedChipRef)}
+          style={{ whiteSpace: 'pre-wrap' }}
+          className="min-h-[200px] p-3 border-2 border-dashed border-gray-300 rounded bg-white text-sm leading-relaxed focus:border-blue-400 outline-none"
+        />
+        <button onClick={save} disabled={saving} className="w-full mt-3 py-2 bg-blue-600 text-white rounded font-bold text-sm disabled:opacity-50">{saving ? '저장 중...' : '발송 메시지 저장'}</button>
+      </div>
+    );
+  };
+
+  // ⭐ 수정 탭 본체 — 이제 본문 편집창을 사이드바에 따로 두지 않는다. 옆에 이미 떠 있는
+  //   계약서(.a4-page, ContractArticles)의 해당 조항이 바로 contentEditable이 되어
+  //   워드/한글처럼 "용지 위에 글쓰는" 느낌으로 고치고, 여기(사이드바)는 조항 선택 +
+  //   끌어다 쓰는 변수 블록 + 저장/취소만 남긴다. 실제 제목/본문 DOM은 App이 만든
+  //   editableTitleRef/editableBodyRef를 통해 계약서 쪽과 공유한다.
+  const ClauseEditorPanel = ({ clauses, setClauses, editingClauseNum, setEditingClauseNum, editableTitleRef, editableBodyRef, draggedChipRef }) => {
+    const [saving, setSaving] = useState(false);
+
+    // ⭐ 변수 블록을 본문 바깥(이 사이드바 쪽)으로 끌어다 놓으면 삭제 — ×/백스페이스가
+    //   항상 되는 대안이라 본문 입장에서는 세 번째 방법일 뿐이다.
+    const handleDeleteZoneDragOver = (e) => { if (draggedChipRef.current) e.preventDefault(); };
+    const handleDeleteZoneDrop = (e) => {
+      if (draggedChipRef.current) {
+        e.preventDefault();
+        draggedChipRef.current.remove();
+        draggedChipRef.current = null;
+      }
+    };
+
+    const selectClause = (num) => {
+      if (num === editingClauseNum) { setEditingClauseNum(null); return; }
+      setEditingClauseNum(num);
+    };
+
+    const cancel = () => setEditingClauseNum(null);
+
+    const save = () => {
+      const num = editingClauseNum;
+      if (!num || !editableTitleRef.current || !editableBodyRef.current) return;
+      const title = editableTitleRef.current.textContent.trim();
+      if (!title) return alert('조항 제목을 입력해 주세요.');
+      const body = serializeEditorHtml(editableBodyRef.current);
+      setSaving(true);
+      google.script.run.withSuccessHandler(() => {
+        setSaving(false);
+        setClauses(prev => ({ ...prev, [num]: { title, body } }));
+        alert('저장되었습니다.');
+      }).withFailureHandler(err => { setSaving(false); alert('저장 실패: ' + err); }).saveClauseTemplate(num, title, body);
+    };
+
+    return (
+      <div>
+        <p className="text-xs font-bold text-gray-500 mb-2">조항/동의서를 고르면 오른쪽 계약서 본문이 바로 수정 가능해집니다</p>
+        <div className="grid grid-cols-3 gap-1 mb-4">
+          {EDITABLE_CLAUSE_NUMS.map(num => (
+            <button
+              key={num}
+              onClick={() => selectClause(num)}
+              className={`px-2 py-2 rounded text-xs font-bold leading-tight ${editingClauseNum === num ? 'bg-blue-600 text-white' : 'bg-white border text-gray-700 hover:bg-gray-50'}`}
+            >
+              {clauseSelectorLabel(num)}
+            </button>
+          ))}
+        </div>
+
+        {editingClauseNum && (
+          <>
+            <div
+              onDragOver={handleDeleteZoneDragOver}
+              onDrop={handleDeleteZoneDrop}
+              className="p-3 bg-gray-50 border border-dashed border-gray-300 rounded"
+            >
+              <p className="text-xs font-bold text-gray-500 mb-2">변수 블록 — 끌어서 오른쪽 계약서 본문에 놓으세요</p>
+              <div className="flex flex-wrap gap-1">
+                {VARIABLE_FIELDS.map(f => (
+                  <div
+                    key={f.token}
+                    draggable="true"
+                    onDragStart={e => e.dataTransfer.setData('text/x-variable-token', f.token)}
+                    className="px-2 py-1.5 bg-white border border-blue-200 rounded cursor-grab text-xs font-bold text-blue-700 hover:bg-blue-50"
+                  >
+                    {f.label}
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-gray-400 pt-2 leading-tight">칩을 지울 땐 ×, 백스페이스, 또는 칩을 여기로 끌어다 놓으세요.</p>
+            </div>
+            <div className="flex gap-2 pt-3">
+              <button onClick={save} disabled={saving} className="flex-1 py-2 bg-blue-600 text-white rounded font-bold text-sm disabled:opacity-50">{saving ? '저장 중...' : `${clauseSelectorLabel(editingClauseNum)} 저장`}</button>
+              <button onClick={cancel} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded font-bold text-sm">편집 종료</button>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
+
+  // ⭐ 7·8·9·10단계에 복붙돼 있던 서명 캔버스 블록을 하나로 묶은 컴포넌트. 처음엔 App
+  //   내부에 중첩해서 정의했었는데, 그러면 App이 리렌더될 때마다(여기서는 손을 떼서
+  //   setIsDrawing(false)가 호출되는 바로 그 순간에!) 함수 참조가 매번 새로 생겨서 React가
+  //   <canvas>를 통째로 마운트 해제/재마운트해버린다 — 그래서 "그려지지만 손을 떼면 지워지는"
+  //   버그가 났다. ContractArticles/SettingsPanel처럼 모듈 스코프로 빼고 필요한 값/함수를
+  //   전부 props로 받아야 리렌더돼도 같은 <canvas> DOM이 유지된다.
+  const SignaturePad = ({ canvasRef, startDraw, moveDraw, setIsDrawing, clearCanvas }) => (
+    <>
+      <div className="border-2 border-gray-400 rounded bg-white touch-none h-40 max-w-[600px] mx-auto">
+        <canvas
+          ref={canvasRef}
+          width={Math.min(window.innerWidth - 40, 600)}
+          height={160}
+          onMouseDown={startDraw}
+          onMouseMove={moveDraw}
+          onMouseUp={()=>setIsDrawing(false)}
+          onMouseLeave={()=>setIsDrawing(false)}
+          onTouchStart={startDraw}
+          onTouchMove={moveDraw}
+          onTouchEnd={()=>setIsDrawing(false)}
+          className="w-full h-full"
+        />
+      </div>
+      <div className="text-center">
+        <button onClick={clearCanvas} className="text-red-500 text-sm mt-2">
+          <Eraser className="inline w-3 h-3"/> 다시 쓰기
+        </button>
+      </div>
+    </>
+  );
+
+  const App = () => {
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ 전화번호 하이픈 처리
+  const autoHyphenPhone = (str) => {
+    const clean = String(str).replace(/[^0-9]/g, '');
+    if (clean.length <= 3) return clean;
+    if (clean.startsWith('02')) {
+      if (clean.length <= 5) return clean.replace(/(\d{2})(\d{1,3})/, '$1-$2');
+      if (clean.length <= 9) return clean.replace(/(\d{2})(\d{3})(\d{1,4})/, '$1-$2-$3');
+      return clean.replace(/(\d{2})(\d{4})(\d{1,4})/, '$1-$2-$3');
+    } else {
+      if (clean.length <= 7) return clean.replace(/(\d{3})(\d{1,4})/, '$1-$2');
+      if (clean.length <= 10) return clean.replace(/(\d{3})(\d{3})(\d{1,4})/, '$1-$2-$3');
+      return clean.replace(/(\d{3})(\d{4})(\d{1,4})/, '$1-$2-$3');
+    }
+  };
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ 주민등록번호 하이픈 처리
+  const autoHyphenRegNum = (str) => {
+    const clean = String(str).replace(/[^0-9]/g, '');
+    if (clean.length <= 6) return clean;
+    return clean.replace(/(\d{6})(\d{1,7})/, '$1-$2').slice(0, 14);
+  };
+
+  // ⭐ 법인별 정보 (서버 설정(회사설정 시트)을 못 불러왔을 때 쓰는 기본값 — 최초 렌더링이 비어보이지 않도록 유지)
+  const DEFAULT_COMPANIES = [
+    { name: '(주)케이프라이드', address: '강원도 횡성군 우천면 우천제2농공단지로 65-50', phone: 'T. 033-644-4467 F.033-644-1944', rep: '김도영', managerPhone: '033-340-0023', managerEmail: 'kpride@example.com', managerName: '송문주'},
+    { name: '㈜케이펙', address: '강원도 강릉시 정원로 54, 8층(교동, 주니어타운)', phone: 'T. 033-644-4467 F.033-644-1944', rep: '김도영', managerPhone: '033-340-0012', managerEmail: 'kpride@example.com', managerName: '하주연' },
+    { name: '백두대간영농조합법인', address: '강원도 강릉시 정원로 54, 8층(교동, 주니어타운)', phone: 'T. 033-644-4467 F.033-644-1944', rep: '김도영', managerPhone: '033-340-0021', managerEmail: 'kpride@example.com', managerName: '서영민' },
+    { name: '㈜보담', address: '강원도 원주시 저금어지길 456(가현동 강원LPC 2층)', phone: 'T. 033-644-4467 F.033-644-1944', rep: '이승수', managerPhone: '033-340-0020', managerEmail: 'kpride@example.com', managerName: '이선우' },
+    { name: '(주)마시타', address: '강원도 강릉시 정원로 54, 8층(교통, 주니어타운)', phone: 'T. 033-644-4467 F.033-644-1944', rep: '김주원', managerPhone: '033-340-0023', managerEmail: 'kpride@example.com', managerName: '송문주'}
+  ];
+  // ⭐ 법인 목록/직인 이미지는 이제 서버(회사설정 시트, 직인 Drive 폴더)에서 불러온다 — 회사 추가/수정 시 코드 배포 없이 시트만 고치면 됨
+  const [companies, setCompanies] = useState(DEFAULT_COMPANIES);
+  const [sealImages, setSealImages] = useState({});
+  // ⭐ "조항템플릿" 시트에서 불러온 고정 조항(제1·9·10·11조) 재정의 — { '1': {title, body}, ... }.
+  //   비어있으면(=로드 전이거나 시트 미설정) ContractArticles가 기존 하드코딩 문구를 그대로 보여준다.
+  const [clauses, setClauses] = useState({});
+  // ⭐ 설정 탭에서 관리하는 "새 계약서 초기값" (근무장소/담당업무/근로시간 등)
+  const [defaults, setDefaults] = useState(null);
+  // ⭐ 설정 탭에서 관리하는 "발송 메시지"(이메일/문자 공용 — 제목은 이메일에만 쓰임).
+  //   null로 두면 서버 getConfig() 응답이 늦거나(혹은 구버전 Code.gs가 배포돼 있어 아예
+  //   안 오거나) 하면 설정 탭이 "불러오는 중..."에서 영영 멈춰버린다. defaults/clauses와
+  //   달리 messageTemplate은 이 기본값 자체가 곧 실제 발송 문구(Code.gs의
+  //   DEFAULT_MESSAGE_SUBJECT/BODY와 동일)라서, 처음부터 바로 보여줘도 안전하다 —
+  //   서버 응답이 오면 그 값으로 덮어쓴다.
+  const [messageTemplate, setMessageTemplate] = useState({
+    subject: '[전자계약] {{companyName}} 전자근로계약서 확인 및 서명 요청',
+    body: '안녕하세요. {{workerName}}님.\n{{companyName}}입니다.\n\n입사를 진심으로 환영 드립니다.\n근로계약 체결을 위해 전자근로계약서를 발송드리오니, 내용을 충분히 검토하신 후 전자서명 진행 부탁드립니다.\n\n문의 사항이 있으면 서명 전 반드시 아래 연락처로 연락 부탁드립니다.\n\n감사합니다.\n\n접속 링크: {{link}}\n접속 비밀번호: 본인 휴대전화번호\n\n담당자: {{managerName}}\n전화번호: {{managerPhone}}\n이메일: {{managerEmail}}'
+  });
+
+  // 4-2. formData — 계약서 핵심 데이터 (Index.html)
+  // ⭐ 계약서 초기 정보값 설정
+  const [formData, setFormData] = useState({
+    companyName: '(주)케이프라이드', companyAddress: '강원도 횡성군 우천면 우천제2농공단지로 65-50', companyPhone: 'T.033-644-4467 F.033-644-1944', repName: '김도영', managerPhone: '033-340-0023', managerEmail: 'kpride@example.com', managerName: '송문주',
+    empName: '', empRegNumber: '', empAddress: '', empPhone: '',
+    joinDate: new Date().toISOString().split('T')[0], contractType: 'regular', startDate: new Date().toISOString().split('T')[0], 
+    contractMonths: '', endDate: '', 
+    useProbation: false, probationStartDate: new Date().toISOString().split('T')[0], probationEndDate: '', probationMonths: '3', probationSalary: '',
+    workPlace: '새말센터', duties: '사무직', dutiesDirect: '', isDirectDuties: false,
+    weeklyWorkDays: '5', dailyWorkHours: '8', weeklyWorkHours: '40', 
+    startTime: '08:00', endTime: '17:00', breakTimeMinutes: '60', breakTimeStart: '11:30', breakTimeEnd: '12:30'
+  });
+
+  // 4-3. 기타 UI 상태 변수 (Index.html)
+  const [workerList, setWorkerList] = useState([{ name: '', password: '', email: '', mode: 'email' }]);
+  // ⭐ 발송 방식은 이제 전역이 아니라 근로자 카드마다 개별 설정 — workerList[i].mode
+  // ⭐ 관리자 화면 상단 탭: 작성(기존 발송 화면) / 수정(조항 편집) / 설정(법인·기본값 관리)
+  const [adminTab, setAdminTab] = useState('작성');
+  // ⭐ 수정 탭에서 지금 "계약서 위에서" 바로 고치고 있는 조항 번호. null이면 전부 읽기 전용.
+  //   본문/제목 DOM은 ContractArticles(계약서 쪽)에 떠 있고, 사이드바(ClauseEditorPanel)의
+  //   저장 버튼이 이 ref들로 직접 읽어가므로 두 컴포넌트가 ref를 공유해야 해서 App에 둔다.
+  const [editingClauseNum, setEditingClauseNum] = useState(null);
+  const editableTitleRef = useRef(null);
+  const editableBodyRef = useRef(null);
+  const draggedChipRef = useRef(null);
+  const [step, setStep] = useState(1); 
+  const [loading, setLoading] = useState(false);
+  const [workerStep, setWorkerStep] = useState(1);
+  const [verificationInput, setVerificationInput] = useState('');
+  const [isIdentityVerified, setIsIdentityVerified] = useState(false);
+  const [isWorkerInfoSubmitted, setIsWorkerInfoSubmitted] = useState(false);
+  const [signatures, setSignatures] = useState({ sign1: null, sign2: null, sign3: null, sign4: null });
+  const [isManagerView, setIsManagerView] = useState(false); 
+  const [contractStatus, setContractStatus] = useState('DRAFT'); 
+  const [urlId, setUrlId] = useState(null);
+  const canvasRef = useRef(null);
+  const justApprovedRef = useRef(false);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [isInvalidLink, setIsInvalidLink] = useState(false);
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ 계약일(계샨용)
+  const calcEnd = (start, months) => {
+    if(!start || !months) return '';
+    // ⭐ new Date(start)로 파싱하면 UTC 자정으로 해석되는데, 그 다음 setMonth/setDate는
+    //   브라우저의 "로컬" 시간대 기준으로 동작해서 UTC보다 느린 시간대(예: 미국)에서 열면
+    //   계약/수습 종료일이 하루 밀릴 수 있었다. Date.UTC + setUTCDate로 전부 UTC 기준으로만
+    //   계산해서 어느 시간대에서 열어도 같은 날짜가 나오게 한다.
+    const [y, m, day] = start.split('-').map(Number);
+    const d = new Date(Date.UTC(y, (m - 1) + parseInt(months), day));
+    d.setUTCDate(d.getUTCDate() - 1);
+    return d.toISOString().split('T')[0];
+  };
+
+  // ⭐ google.script.run 공통 실패 처리 — withFailureHandler가 없으면 서버 에러 시
+  //   화면이 "처리중..."에 멈춘 채로 성공인지 실패인지 알 수 없는 상태가 된다.
+  //   중요한 사용자 액션(발송/서명제출/승인 등)에는 이걸로 로딩을 풀고 알려준다.
+  const handleServerError = (error) => {
+    setLoading(false);
+    alert("오류가 발생했습니다. 잠시 후 다시 시도해 주세요.\n(" + (error && error.message ? error.message : String(error)) + ")");
+  };
+
+  // ⭐ 기존 서명 보여주기
+  useEffect(() => {
+    if (workerStep >= 7 && workerStep <= 10 && canvasRef.current) {
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      let signKey = workerStep === 10 ? 'sign4' : `sign${workerStep - 6}`;
+      
+      if (signatures[signKey]) {
+        const img = new Image();
+        img.onload = () => {
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        };
+        img.src = signatures[signKey];
+      }
+    }
+  }, [workerStep]);
+  
+  useEffect(() => {
+    const idInput = document.getElementById('data-contract-id');
+    const modeInput = document.getElementById('data-view-mode');
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const id = urlParams.get('id') || (idInput ? idInput.value : null);
+    const mode = urlParams.get('mode') || (modeInput ? modeInput.value : null);
+    
+    setUrlId(id);
+
+    // ⭐ (근로자)접속 링크 유효성 검사
+    if (id && id !== "null" && id !== "") {
+      setLoading(true);
+      const timeoutId = setTimeout(() => { if(loading) { setLoading(false); alert("서버 응답 지연."); } }, 8000);
+
+      if (window.google && window.google.script) {
+        if (mode === 'view') {
+          setIsManagerView(true);
+          google.script.run.withSuccessHandler(data => {
+            clearTimeout(timeoutId); setLoading(false);
+            if (data) { 
+              setFormData(data); 
+              setSignatures({ sign1: data.sign1, sign2: data.sign2, sign3: data.sign3, sign4: data.sign4 }); 
+              setContractStatus(data.status || 'COMPLETED');
+              setStep(3); 
+            } else {
+              alert("유효하지 않거나 삭제된 문서입니다.");
+              setIsInvalidLink(true);
+            }
+          }).withFailureHandler(err => {
+            clearTimeout(timeoutId); setLoading(false);
+            console.error('계약서 로드 실패:', err);
+            setIsInvalidLink(true);
+          }).loadSignedData(id);
+        } else {
+          google.script.run.withSuccessHandler(data => {
+            clearTimeout(timeoutId); setLoading(false);
+            if (data === "ALREADY_COMPLETED") {
+              setStep(3); setContractStatus('COMPLETED');
+              return alert("이미 최종 완료된 계약서입니다.");
+            }
+            if (data === "ALREADY_SUBMITTED") {
+              // ⭐ 이미 서명 제출을 마치고 승인 대기 중인 상태 — 재작성은 막되, "유효하지 않은 링크"가
+              //   아니라 SIGNED_BY_WORKER용 "전송 완료" 화면(아래 step3)을 그대로 보여준다.
+              setStep(3); setContractStatus('SIGNED_BY_WORKER');
+              return;
+            }
+            if (data) {
+              setFormData({ ...data, empName: data.empName || '', empPhone: data.empPhone || '' });
+              setContractStatus(data.status || 'DRAFT');
+              if (data.status === 'SIGNED_BY_WORKER') {
+                setSignatures({ sign1: data.sign1, sign2: data.sign2, sign3: data.sign3, sign4: data.sign4 });
+                setStep(3); 
+              } else {
+                setStep(2); setIsIdentityVerified(false);
+              }
+            } else { 
+              alert("유효하지 않은 링크입니다.");
+              setIsInvalidLink(true);
+            }
+          }).withFailureHandler(err => {
+            clearTimeout(timeoutId); setLoading(false);
+            console.error('계약서 로드 실패:', err);
+            setIsInvalidLink(true);
+          }).loadDraftData(id);
+        }
+      } else { clearTimeout(timeoutId); setLoading(false); }
+    }
+  }, []);
+
+  // ⭐ 법인 목록/직인 이미지를 서버(회사설정 시트, 직인 Drive 폴더)에서 불러오기
+  // 새 계약서를 처음 작성하는 경우(id 없음)에는 목록의 첫 번째 법인으로 기본값도 맞춰준다.
+  useEffect(() => {
+    if (!(window.google && window.google.script)) return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const hasId = !!urlParams.get('id');
+    google.script.run.withSuccessHandler(cfg => {
+      if (cfg && cfg.companies && cfg.companies.length) {
+        setCompanies(cfg.companies);
+        if (!hasId) {
+          const first = cfg.companies[0];
+          setFormData(prev => ({
+            ...prev,
+            companyName: first.name, companyAddress: first.address, companyPhone: first.phone,
+            repName: first.rep, managerPhone: first.managerPhone, managerEmail: first.managerEmail, managerName: first.managerName
+          }));
+        }
+      }
+      if (cfg && cfg.clauses) setClauses(cfg.clauses);
+      if (cfg && cfg.defaults) {
+        setDefaults(cfg.defaults);
+        // ⭐ 새 계약서 작성 시(id 없음)에만 기본값을 덮어쓴다 — 이미 불러온/서명 중인 계약서는 건드리지 않음
+        if (!hasId) setFormData(prev => ({ ...prev, ...cfg.defaults }));
+      }
+      if (cfg && cfg.messageTemplate) setMessageTemplate(cfg.messageTemplate);
+    }).withFailureHandler(err => console.error('법인 목록 로드 실패(기본값 사용):', err)).getConfig();
+  }, []);
+
+  // ⭐ 직인 이미지는 이제 getConfig()에 포함되지 않는다(모든 방문자에게 5개 법인 것을 다 내려주던
+  //   문제 수정). 계약이 실제로 COMPLETED 상태가 됐을 때(=관리자가 승인/날인한 뒤)만, 그
+  //   법인 것 한 장만 따로 요청한다 — 서명 중인 근로자나 아직 승인 전 상태에서는 아예 요청하지 않는다.
+  useEffect(() => {
+    if (contractStatus === 'COMPLETED' && formData.companyName && !sealImages[formData.companyName] && window.google && window.google.script) {
+      google.script.run.withSuccessHandler(result => {
+        if (result && result.dataUrl) setSealImages(prev => ({ ...prev, [formData.companyName]: result.dataUrl }));
+        else if (result) console.warn('직인 이미지 없음:', result.message);
+      }).withFailureHandler(err => console.error('직인 이미지 로드 실패:', err)).getSealImage(formData.companyName);
+    }
+  }, [contractStatus, formData.companyName]);
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ 입력값 변경 처리 - 관리자 우측 화면
+  const handleChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    const newVal = type === 'checkbox' ? checked : value;
+
+    if (name === 'companySelect') {
+      const selected = companies.find(c => c.name === value);
+      setFormData({ ...formData, companyName: selected.name, companyAddress: selected.address, companyPhone: selected.phone, repName: selected.rep, managerPhone: selected.managerPhone, managerEmail: selected.managerEmail, managerName: selected.managerName });
+    } else if (name === 'joinDate') {
+      let up = { ...formData, joinDate: newVal, startDate: newVal, probationStartDate: newVal };
+      if(formData.probationMonths) up.probationEndDate = calcEnd(newVal, formData.probationMonths);
+      if(formData.contractType === 'contract' && formData.contractMonths && formData.contractMonths !== 'direct') up.endDate = calcEnd(newVal, formData.contractMonths);
+      setFormData(up);
+    } else if (name === 'probationMonths') {
+      setFormData({ ...formData, probationMonths: newVal, probationEndDate: calcEnd(formData.probationStartDate, newVal) });
+    } else if (name === 'contractMonths') {
+      if (newVal === 'direct') setFormData({ ...formData, contractMonths: newVal, endDate: '' });
+      else setFormData({ ...formData, contractMonths: newVal, endDate: calcEnd(formData.startDate, newVal) });
+    } else if (name === 'useProbation') {
+      if (newVal) setFormData({ ...formData, useProbation: newVal, probationEndDate: calcEnd(formData.probationStartDate, formData.probationMonths) });
+      else setFormData({ ...formData, useProbation: newVal });
+    } else if (name === 'probationStartDate') {
+      setFormData({ ...formData, probationStartDate: newVal, probationEndDate: calcEnd(newVal, formData.probationMonths) });
+    } else if (name === 'empRegNumber') {
+      setFormData({ ...formData, [name]: autoHyphenRegNum(newVal) });
+    } else if (name === 'empPhone') {
+      setFormData({ ...formData, [name]: autoHyphenPhone(newVal) });
+    } else if (name === 'dutiesSelect') {
+      if (newVal === '직접입력') setFormData({ ...formData, isDirectDuties: true, duties: formData.dutiesDirect });
+      else setFormData({ ...formData, isDirectDuties: false, duties: newVal });
+    } else if (name === 'dutiesDirect') {
+      setFormData({ ...formData, dutiesDirect: newVal, duties: newVal });
+    } else if (name === 'dailyWorkHours' || name === 'weeklyWorkDays') {
+        const daily = name === 'dailyWorkHours' ? parseFloat(newVal || 0) : parseFloat(formData.dailyWorkHours || 0);
+        const days = name === 'weeklyWorkDays' ? parseFloat(newVal || 0) : parseFloat(formData.weeklyWorkDays || 0);
+        const autoWeekly = (daily * days);
+        setFormData({ ...formData, [name]: newVal, weeklyWorkHours: String(autoWeekly) });
+    } else {
+      setFormData({ ...formData, [name]: newVal });
+    }
+  };
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ (관리자)근로자 발송 정보 입력 여부 & 발송 완료
+  const handleSend = () => {
+    for (let i = 0; i < workerList.length; i++) {
+      const w = workerList[i];
+      if (!w.name.trim()) {
+        return alert(`${i + 1}번째 근로자의 성명을 입력해 주세요.`);
+      }
+      if (!w.password.trim()) {
+        return alert(`${i + 1}번째 근로자의 전화번호를 입력해 주세요.`);
+      }
+      if (w.mode === 'email' && !w.email.trim()) {
+        return alert(`${i + 1}번째 근로자의 이메일을 입력해 주세요.`);
+      }
+    }
+
+    if(!confirm("발송하시겠습니까?")) return;
+    setLoading(true);
+    google.script.run.withSuccessHandler(res => {
+      setLoading(false);
+      // ⭐ 대량 발송 시 일부는 즉시, 나머지는 몇 분 간격으로 자동으로 이어서 발송된다(processSendQueue).
+      //   실패(failNow)가 있으면 queuedRemaining이 0이어도 "발송 완료"로 뜨면 안 되므로 반드시 먼저 체크한다.
+      if (res && res.failNow > 0) {
+        alert(`⚠ 발송 실패 있음: 총 ${res.totalCount}명 중 ${res.failNow}명 발송 실패.${res.sentNow ? ` (${res.sentNow}명 성공)` : ''}${res.queuedRemaining ? `\n나머지 ${res.queuedRemaining}명은 잠시 후 순차 발송됩니다.` : ''}\n'발송큐' 시트에서 FAILED 항목의 사유를 확인해 주세요.`);
+      } else if (res && res.queuedRemaining > 0) {
+        alert(`발송 시작됨: 총 ${res.totalCount}명 중 ${res.sentNow}명 즉시 발송 완료.\n나머지 ${res.queuedRemaining}명은 잠시 후부터 순차적으로 자동 발송됩니다.`);
+      } else {
+        alert(`발송 완료! (총 ${res ? res.totalCount : workerList.length}명)`);
+      }
+    }).withFailureHandler(handleServerError).sendBatchContracts(formData, workerList);
+  };
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ (근로자)본인인증 확인
+  const checkPw = () => {
+    if (!verificationInput.trim()) return alert("비밀번호(전화번호)를 입력해 주세요.");
+    setLoading(true);
+    google.script.run.withSuccessHandler(ok => {
+      setLoading(false);
+      if (ok) setIsIdentityVerified(true);
+      else alert("비밀번호 불일치");
+    }).withFailureHandler(handleServerError).verifyIdentity(urlId, verificationInput);
+  };
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ (근로자)정보 입력 확인
+  const submitWorkerInfo = () => {
+    if(!formData.empName || !formData.empRegNumber || !formData.empAddress || !formData.empPhone) return alert("모든 정보를 입력해주세요.");
+    setIsWorkerInfoSubmitted(true);
+  };
+  
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ 서명 시작점 확인
+  const startDraw = (e) => { 
+    const ctx = canvasRef.current.getContext('2d'); 
+    ctx.lineWidth = 5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'black';
+    
+    const rect = canvasRef.current.getBoundingClientRect(); 
+    const x = (e.clientX||e.touches[0].clientX) - rect.left; 
+    const y = (e.clientY||e.touches[0].clientY) - rect.top; 
+    ctx.beginPath(); ctx.moveTo(x,y); setIsDrawing(true); 
+  };
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ 서명 그리기
+  const moveDraw = (e) => { 
+    if(!isDrawing) return; 
+    const ctx = canvasRef.current.getContext('2d'); 
+    const rect = canvasRef.current.getBoundingClientRect(); 
+    const x = (e.clientX||e.touches[0].clientX) - rect.left; 
+    const y = (e.clientY||e.touches[0].clientY) - rect.top; 
+    ctx.lineTo(x,y); 
+    ctx.stroke(); 
+  };
+  
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ 서명 지우기
+  const clearCanvas = () => {
+    const canvas = canvasRef.current;
+    if(canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    let signKey = workerStep === 10 ? 'sign4' : `sign${workerStep - 6}`;
+    setSignatures(prev => ({ ...prev, [signKey]: null }));
+  };
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ 서명 크기 조정
+  const getCompressedSignature = () => {
+    const canvas = canvasRef.current;
+    const mini = document.createElement('canvas');
+    mini.width = canvas.width / 2;
+    mini.height = canvas.height / 2;
+    const ctx = mini.getContext('2d');
+    ctx.drawImage(canvas, 0, 0, mini.width, mini.height);
+    return mini.toDataURL('image/png');
+  };
+  
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ (근로자)서명 확인
+  const saveSignatureAndNext = (signKey) => {
+    const canvas = canvasRef.current;
+    const blank = document.createElement('canvas'); blank.width = canvas.width; blank.height = canvas.height;
+    if(canvas.toDataURL() === blank.toDataURL()) return alert("서명을 해주세요.");
+    const currentSignData = getCompressedSignature(); 
+    setSignatures(prev => ({ ...prev, [signKey]: currentSignData }));
+    setWorkerStep(workerStep + 1);
+  };
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ (근로자)서명 확인
+  const finalSubmit = () => {
+    const canvas = canvasRef.current;
+    const blank = document.createElement('canvas'); blank.width = canvas.width; blank.height = canvas.height;
+    if(canvas.toDataURL() === blank.toDataURL()) return alert("서명을 해주세요.");
+    const finalSign = getCompressedSignature();
+    const finalSignatures = { ...signatures, sign4: finalSign };
+    
+    if(!confirm("서명을 제출하시겠습니까? 담당자 승인 후 계약이 최종 완료됩니다.")) return;
+    setLoading(true);
+    google.script.run.withSuccessHandler(() => {
+      setLoading(false); 
+      setSignatures(finalSignatures); 
+      setContractStatus('SIGNED_BY_WORKER');
+      setStep(3); 
+    }).withFailureHandler(handleServerError).saveContractData({ ...formData, ...finalSignatures, contractId: urlId });
+  };
+
+  // 4-4. 주요 헬퍼 함수 (Index.html)
+  // ⭐ (관리자)최종 승인 확인
+  const managerApprove = () => {
+    if(!confirm("이대로 계약을 최종 승인하고 직인을 날인하시겠습니까?\n근로자에게 완료 메일(PDF 첨부)이 자동 발송됩니다.")) return;
+    setLoading(true);
+    google.script.run.withSuccessHandler(() => {
+      // ⭐ 이 법인의 직인 이미지를 먼저 받아온 뒤에 COMPLETED로 전환한다. 순서를 반대로 하면
+      //   자동 아카이빙(#print-area 캡처)이 직인 이미지가 도착하기 전 화면을 스냅샷으로
+      //   떠버릴 수 있다.
+      google.script.run.withSuccessHandler(sealResult => {
+        setLoading(false);
+        justApprovedRef.current = true;
+        if (sealResult && sealResult.dataUrl) {
+          setSealImages(prev => ({ ...prev, [formData.companyName]: sealResult.dataUrl }));
+          setContractStatus('COMPLETED');
+          alert("최종 승인 및 발송이 완료되었습니다.");
+        } else {
+          // ⭐ 예전엔 직인을 못 찾아도 조용히 넘어가서 "직인이 안 찍혔는데 왜인지 모르겠다"는
+          //   상태가 됐다. 승인/보관 자체는 그대로 진행하되(이미 approveContract 성공), 왜
+          //   직인 없이 저장되는지 이유를 바로 알려준다.
+          setContractStatus('COMPLETED');
+          console.warn('직인 이미지 없음/실패:', sealResult && sealResult.message);
+          alert("최종 승인 및 발송은 완료되었지만, 직인 없이 저장됩니다.\n\n사유: " + (sealResult ? sealResult.message : '알 수 없는 오류') + "\n\nDrive의 \"전자근로계약_직인\" 폴더에 회사설정 시트의 법인명과 정확히 같은 파일명(예: (주)케이프라이드.png)으로 이미지가 있는지 확인해 주세요.");
+        }
+      }).withFailureHandler(sealErr => {
+        // ⭐ 이 시점엔 approveContract가 이미 성공해서 계약은 COMPLETED로 커밋된 뒤다.
+        //   직인 이미지 조회 자체(네트워크/권한 등)가 실패한 것이므로 승인 자체를 실패로
+        //   보이게 하지 않고, 직인 없이 완료 화면으로 계속 진행하되 이유는 알려준다.
+        console.error('직인 이미지 로드 실패, 직인 없이 계속 진행:', sealErr);
+        setLoading(false);
+        justApprovedRef.current = true;
+        setContractStatus('COMPLETED');
+        alert("최종 승인은 완료되었습니다. 다만 직인 이미지 조회 중 오류가 발생해 직인 없이 저장됩니다.\n\n오류: " + sealErr);
+      }).getSealImage(formData.companyName);
+    }).withFailureHandler(handleServerError).approveContract({ ...formData, ...signatures, contractId: urlId });
+  };
+
+  // ⭐ 승인 직후(직인이 찍힌 최종본이 렌더링된 시점) 화면에 보이는 계약서 그대로를 서버로 보내
+  // Drive에 자동 백업한다. 이미 완료된 계약서를 나중에 다시 열람할 때는(재승인이 아니므로) 반복 저장하지 않는다.
+  useEffect(() => {
+    if (contractStatus === 'COMPLETED' && justApprovedRef.current) {
+      justApprovedRef.current = false;
+      const el = document.getElementById('print-area');
+      if (el && urlId) {
+        // 화면 표시 전환용 클래스(hidden)만 제거한 사본을 만들고, 현재 적용 중인 스타일(Tailwind CDN이
+        // 생성한 것 포함)을 그대로 함께 담아 보내 표/테두리 등 서식이 보관본에도 그대로 남게 한다.
+        const clone = el.cloneNode(true);
+        clone.classList.remove('hidden');
+        const styles = Array.from(document.querySelectorAll('style')).map(s => s.outerHTML).join('');
+        google.script.run
+          .withFailureHandler(err => console.error('계약서 자동 저장 실패:', err))
+          .archiveContractHtml(urlId, styles + clone.outerHTML);
+      }
+    }
+  }, [contractStatus]);
+
+  // ⭐ 발송 최대 인원
+  const addWorker = () => {
+    if (workerList.length >= 10) return alert("최대 10명"); setWorkerList([...workerList, { name: '', email: '', password: '', mode: 'email' }]); };
+    const removeWorker = (index) => { if (workerList.length === 1) return; 
+    const newList = [...workerList]; newList.splice(index, 1);
+    setWorkerList(newList);
+  };
+
+  // ⭐ 근로자 단계별 확인화면(2~6단계)에서 쓰는 축약형 — resolveClause에 formData/clauses를
+  //   매번 넘기지 않도록 묶어둔다. 반환값은 { title, html } 그대로.
+  const stepClause = (num, fallbackTitle, fallbackBody) => resolveClause(num, fallbackTitle, fallbackBody, formData, clauses);
+
+  if (loading) return <div className="h-screen flex items-center justify-center font-bold text-xl">처리중...</div>;
+
+  // ⭐ (근로자)접속 링크 유효성 확인
+  if (isInvalidLink) {
+    return (
+      <div className="min-h-screen bg-gray-200 flex items-center justify-center p-4 font-sans">
+        <div className="bg-white p-10 rounded-xl shadow-2xl max-w-md w-full text-center border border-gray-300">
+          <div className="mb-6 flex justify-center">
+            <div className="bg-red-100 p-4 rounded-full">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-4">접속 불가</h2>
+          <p className="text-gray-600 leading-relaxed break-keep">
+            유효하지 않거나 이미 만료된 계약서 링크입니다.<br/>
+            문서가 삭제되었거나 기한이 지났을 수 있습니다.<br/>
+            <strong className="text-gray-800 mt-2 inline-block">담당자에게 다시 문의해 주세요.</strong>
+          </p>
+        </div>
+      </div>
+    );
+  }
+  
+  // ⭐ 근로자 화면
+  return (
+    <div className="bg-gray-200 min-h-screen font-sans flex flex-col items-center">
+      
+      {/* ⭐ (근로자)본인인증 */}
+      {step === 2 && !isIdentityVerified && !isManagerView && (
+        <div className="fixed inset-0 z-50 bg-gray-100 flex items-center justify-center p-4">
+          <div className="bg-white p-10 rounded-3xl shadow-2xl max-w-md w-full text-center border-2 border-blue-50">
+            <Lock className="w-12 h-12 mx-auto mb-4 text-blue-600 inline-block" />
+            <h2 className="text-2xl font-bold mb-2">본인인증</h2>
+            <p className="text-gray-500 mb-8 text-sm">비밀번호(전화번호)를 입력하세요.</p>
+            <input type="password" value={verificationInput} onChange={e=>setVerificationInput(e.target.value)} className="w-full p-5 border-2 rounded-2xl text-2xl text-center tracking-widest mb-6 focus:border-blue-500 outline-none" placeholder="전화번호" />
+            <button onClick={checkPw} className="w-full py-5 bg-blue-600 text-white rounded-2xl text-xl font-bold shadow-lg hover:bg-blue-700">인증하기</button>
+          </div>
+        </div>
+      )}
+
+      {/* ⭐ (근로자)정보 입력 */}
+      {step === 2 && isIdentityVerified && !isWorkerInfoSubmitted && !isManagerView && (
+        <div className="fixed inset-0 z-50 bg-white flex flex-col items-center justify-center p-6 overflow-y-auto">
+          <div className="w-full max-w-lg">
+            <div className="text-center mb-8">
+              <h2 className="text-3xl font-bold text-gray-900 mb-2">근로자 정보 확인</h2>
+              <p className="text-gray-500">정확한 계약 작성을 위해 정보를 확인해주세요.</p>
+            </div>
+            <div className="space-y-6">
+              <div><label className="block text-sm font-bold text-gray-700 mb-1">성 명</label><input type="text" name="empName" value={formData.empName} onChange={handleChange} className="w-full p-4 border rounded-lg text-lg bg-gray-50"/></div>
+              <div><label className="block text-sm font-bold text-gray-700 mb-1">연락처</label><input type="text" name="empPhone" value={formData.empPhone} onChange={handleChange} className="w-full p-4 border rounded-lg text-lg bg-gray-50"/></div>
+              <div><label className="block text-sm font-bold text-blue-700 mb-1">주민등록번호 (필수)</label><input type="text" name="empRegNumber" placeholder="예: 900101-1234567" value={formData.empRegNumber} onChange={handleChange} className="w-full p-4 border rounded-lg text-lg"/></div>
+              <div><label className="block text-sm font-bold text-blue-700 mb-1">현재 거주 주소 (필수)</label><input type="text" name="empAddress" placeholder="도로명 주소 입력" value={formData.empAddress} onChange={handleChange} className="w-full p-4 border rounded-lg text-lg"/></div>
+            </div>
+            <button onClick={submitWorkerInfo} className="w-full py-5 bg-blue-600 text-white rounded-xl font-bold text-xl mt-10 shadow-lg hover:bg-blue-700 transition">정보 입력 완료</button>
+          </div>
+        </div>
+      )}
+
+      {/* ⭐ 근로자 정보 입력 */}
+      {step === 2 && isIdentityVerified && isWorkerInfoSubmitted && !isManagerView && (
+        <div className="fixed inset-0 z-50 bg-white flex flex-col p-0">
+          <div className="bg-white border-b p-4 flex justify-between items-center sticky top-0 z-10 shadow-sm">
+            <span className="text-sm font-bold text-gray-500">Step {workerStep} / 10</span>
+            <h2 className="text-lg font-bold truncate px-2">{workerStep <= 6 ? '근로계약서 확인' : '동의 및 서명'}</h2>
+            <div className="w-10"></div>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto p-6 text-lg leading-relaxed text-gray-800 pb-32 break-keep">
+            {/* ⭐ [단계1]사용자 및 근로자 정보*/}
+            {workerStep === 1 && (
+              <div className="space-y-6">
+                <h3 className="text-2xl font-bold border-b-2 border-black pb-2 mb-4 text-center">근 로 계 약 서</h3>
+                <div className="text-right text-sm mb-4 font-bold">입사일 : {formatDate(formData.joinDate)}</div>
+                <table className="c-table mb-8 text-sm">
+                  <tbody>
+                    <tr><td rowSpan="3" className="bg-gray-label w-24">사용자<br/>("갑")</td><td className="bg-gray-label w-20">명 칭</td><td className="pl-4 font-bold">{formData.companyName}</td></tr>
+                    <tr><td className="bg-gray-label">주 소</td><td className="pl-4">{formData.companyAddress}</td></tr>
+                    <tr><td className="bg-gray-label">전화번호</td><td className="pl-4">{formData.companyPhone}</td></tr>
+                    <tr><td rowSpan="3" className="bg-gray-label">근로자<br/>(을)</td><td className="bg-gray-label">성명</td><td className="pl-4"><span>{formData.empName}</span> <span className="text-gray-600 ml-2">(주민등록번호: {formData.empRegNumber})</span></td></tr>
+                    <tr><td className="bg-gray-label">주 소</td><td className="pl-4">{formData.empAddress}</td></tr>
+                    <tr><td className="bg-gray-label">연락처</td><td className="pl-4">{formData.empPhone}</td></tr>
+                  </tbody>
+                </table>
+                <p><strong>{formData.companyName}</strong>에 재직 중 근로기준법과 취업규칙 및 제반규정을 성실히 준수할 것을 서약하고 다음과 같이 근로계약을 체결한다.</p>
+              </div>
+            )}
+            
+            {/* ⭐ [단계2]제1~2조*/}
+            {workerStep === 2 && (() => {
+              const c1 = stepClause(1, '목적', '본 근로계약서는 "갑"과 "을"이 근로계약을 체결함에 있어 임금, 근로시간 등 근로조건을 정하는 것을 목적으로 한다.');
+              return (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="font-bold text-base mb-1">제1조({c1.title})</h3>
+                  <p className="pl-4 text-base" dangerouslySetInnerHTML={{ __html: c1.html }} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base mb-1">제2조(근로계약기간)</h3>
+                  <table className="c-table mt-2 text-sm">
+                    <colgroup>
+                      <col className="w-24 bg-gray-label"/><col />
+                    </colgroup>
+                    <tbody>
+                      <tr>
+                        <td className="bg-gray-label">구 분</td>
+                        <td className="bg-gray-label">근 로 계 약 기 간</td>
+                      </tr>
+                      <tr>
+                        <td className="pl-2">{formData.contractType === 'regular' ? '■' : '□'} 정규직</td>
+                        <td className="pl-2">"갑"은 "을"을 기간의 정함이 없는 근로자로서 정년 시까지 고용을 보장한다.<br/>({formatDate(formData.startDate)} ~ 정년 시까지 고용 보장)</td>
+                      </tr>
+                      <tr>
+                        <td className="pl-2">{formData.contractType === 'contract' ? '■' : '□'} 계약직</td>
+                        <td className="pl-2">{formatDate(formData.startDate)} ~ {formatDate(formData.endDate)}
+                          <span className="ml-2">({formData.contractMonths === 'direct' ? '별도협의' : formData.contractMonths + ' 개월'})</span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="pl-2">{formData.useProbation ? '■' : '□'} 수습기간</td>
+                        <td className="pl-2">1. 채용일로부터 {formData.probationMonths}개월간 1개월 단위기간으로 종료되는 수습및시용 기간으로 한다. 해당기간 동안 업무적격여부 판단에 따라 수습및시용 기간 중이라도 계약의 해지 또는 본채용을 거부할 수 있다.<br/>2. 업무적격여부 판단기준은 수습평가서에 의해 결정 한다.<br/>3. 본인은 '갑'의 관련규정에 의거 채용일로부터 {formData.probationMonths}개월간 수습및시용 근로자로서 임금을 하향하여 지급받음에 이의를 제기하지 아니한다.<br/>(기간: {formData.useProbation ? formatDate(formData.probationStartDate) + " ~ " + formatDate(formData.probationEndDate) : "      년      월      일 ~      년      월      일까지"} / 월 {formData.probationSalary || '별도 정함'}원)</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>);
+            })()}
+
+            {/* ⭐ [단계3]제3~5조*/}
+            {workerStep === 3 && (() => {
+              const c3 = stepClause(3, '근무장소', '"을"의 근무 장소는 {{workPlace}}(으)로 한다. 다만 "갑"은 인사명령에 의거 "을"의 근무 장소를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.');
+              const c4 = stepClause(4, '담당업무', '"을"의 담당업무는 {{duties}}(으)로 한다. 다만, "갑"은 인사명령에 의거 "을"의 담당업무를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.');
+              const c5 = stepClause(5, '임금', '(1) 임금형태 : "갑"과 "을"은 월급제로 임금계약을 체결한다. (기본급과 법정 제수당이 포함된 "포괄임금")<br/>(2) 임금내용 : 월급총액, 월급의 구성내역, 지급방법 등은 임금계약서에 의한다.<br/>(3) 사정변경 : "갑"은 계약기간 중 제반 경영여건상 처우조건이 불가피하거나, 인사상 처우조정 사유발생시에는 제반기준에 의거 임금을 조정할 수 있다.<br/>(4) 임금인상 : "갑"과 "을"은 근로계약기간이 종료되는 시점에서 업무상 필요성, "갑"의 경영사정에 의거 재계약을 체결할 시 상호 대등한 입장으로 임금인상 등을 협의할 수 있다. 다만 임금내용의 변동이 없는 경우, 또는 임금인상에 대한 합의가 성립 되지 않는 경우 이전과 동일한 금액으로 반복하여 체결하며 "을"은 이에 이의를 제기하지 않는다.<br/>(5) 임금산정일 및 지급일자 : 초일부터 말일까지 계산하여 익월 10일에 지급한다. (단 공휴일일경우에는 그 다음 영업일에 지급한다.)<br/>(6) 비밀유지 : 임금은 회사의 규정과 상사의 지시에 따른 본인의 근로제공에 대한 모든 금전적 보상임을 확인하며 직원상호간 비밀의무를 반드시 준수한다.');
+              return (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="font-bold text-base mb-1">제3조({c3.title})</h3>
+                  <p className="pl-4 text-base" dangerouslySetInnerHTML={{ __html: c3.html }} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base mb-1">제4조({c4.title})</h3>
+                  <p className="pl-4 text-base" dangerouslySetInnerHTML={{ __html: c4.html }} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base mb-1">제5조({c5.title})</h3>
+                  <div className="pl-4 text-base" dangerouslySetInnerHTML={{ __html: c5.html }} />
+                </div>
+              </div>);
+            })()}
+
+            {/* ⭐ [단계4]제6조*/}
+            {workerStep === 4 && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="font-bold text-base mb-1">제6조(근로시간 및 휴게시간)</h3>
+                  <div className="pl-4 text-base">
+                    <p className="mb-2">( 1 ) "을"의 1주간, 1일의 소정근로시간, 휴게시간은 다음표와 같다. 단, 휴일은 회사 사정에 따라 근무할 수있고, 근로자는 정당한 사유없이 거부할 수 없다.</p>
+                    <table className="c-table my-2 text-center table-fixed text-sm">
+                    <colgroup>
+                      <col className="w-[20%]"/>
+                      <col className="w-[48%]"/>
+                      <col className="w-[32%]"/>
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <td className="bg-gray-label">1 주간</td>
+                        <td className="bg-gray-label">근로시간(시업시각, 종업시각 등)</td>
+                        <td className="bg-gray-label">휴게시간</td>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        {formData.isBiweekly ? (
+                          <>
+                            <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleWeek}</td>
+                            <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleWork}</td>
+                            <td className="whitespace-pre-wrap text-center px-2">{formData.customScheduleBreak}</td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="text-center">{formData.weeklyWorkHours}시간</td>
+                            <td className="text-center">
+                              1일 {formData.dailyWorkHours}시간 
+                              {formData.weeklyWorkDays !== '5' && ` 주 ${formData.weeklyWorkDays}일`}
+                              <br/>[ 시업 {formData.startTime} ~ 종업 {formData.endTime} ]
+                            </td>
+                            <td className="text-center">{formData.breakTimeMinutes}분 <br/>[ {formData.breakTimeStart}~{formData.breakTimeEnd} ]</td>
+                          </>
+                        )}
+                      </tr>
+                    </tbody>
+                  </table>
+                    <p className="mt-2">* 업무상황 및 근무 여건에 따라 근로 시간 및 휴게시간은 조정 및 변경 될수 있다.</p>
+                    <p>* 업무상황 및 경영사정에 따라 근무일은 교대제로 운영할 수 있다.</p>
+                    <p className="mb-2 mt-2">( 2 ) 시간외근로(연장.야간.휴일근로) : "갑"과"을"은 본 근로계약서 작성으로 회사의 업무 특성상 수반되는 고정적인 시간외근로가 필요한 경우 이에 임할 것을 합의하며, "갑"은 "을"의 임금(연봉월액) 지급시 이를 포함한 포괄임금제로 지급함에 있어 "을"은 이에 동의한다. ( 시간외수당 가산율은 통상시급의 100분의 50 으로 한다 )</p>
+                    <p>( 3 ) "을"은 고정적인 시간외근로외에 시간외 근로가 필요한 경우 "갑"에게 보고한 후 승인을 득하여야 하며, 승인을 득하지 아니한 시간외근로는 근로시간으로 보지 아니한다.</p>
+                  </div>
+                </div>
+              </div>)}
+            
+            {/* ⭐ [단계5]제7~8조*/}
+            {workerStep === 5 && (() => {
+              const c7 = stepClause(7, '휴일 및 휴가', '(1) 휴일 : 주휴일(1주간 소정근로일수 개근시 주1회), 근로자의 날, 관공서공휴일규정에 따른 공휴일과 대체공휴일<br/> ※ 업무 특성 상 특정 주에 변경되는 주휴일은 휴일변경(대체)하는 것이며, 근로자는 이에 동의한다.<br/>(2) 휴가 : 연차유급휴가는 "근로기준법"에 의한다. (1년간 80퍼센트 이상 출근한 근로자에게 15일 / 1년 미만 근로자의 경우 1개월 개근시 1일)<br/> ※ 근로자가 본인에게 발생한 연차유급휴가일수 보다 더 많은 연차휴가를 사용한 경우 이는 "사용자"가 "근로자"에게 향후 발생할 연차휴가를 선사용하도록 허용한 것이므로 "근로자"가 퇴사하는 경우 더 많이 사용한 연차휴가 일수만큼 임금을 공제할 수 있다.<br/> ※ 1주간 소정근로시간 15시간 미만인 자는 휴일 및 휴가 규정은 적용하지 아니한다. (근로자의 날 제외)');
+              const c8 = stepClause(8, '근로계약의 종료 등', '(1) "을"이 정년에(만60세) 도달하거나 약정한 근로계약기간의 만료로 근로계약은 자동 종료된다.<br/>(2) 근로계약의 만료일이 지정된 경우 계약기간 만료시 본 계약은 자동해지 된다.<br/>(3) "갑"의 해지사유 : "갑"은 정년도래, 기간만료 이외 "갑"의 관련규정 등에서 정한 정당한 사유가 있는 경우에는 "을"의 의사에도 불구하고 근로계약을 해지할 수 있다. 다만, "갑"은 근로기준법에서 규정하고 있는 해고예고의 예외가 되는 근로자의 귀책사유 이외에는 해고예정일 30일전에 서면으로 통보해야 한다.<br/>(4) "을"의 해지사유 : "을"이 정년도래, 기간만료 이외 계약을 해지하고자 하는 경우에는 30일전에 "갑"에게 통보하여야 하고 후임자에게 업무의 인수인계를 하여야 하며, 이를 해태함으로 인하여 "갑"에게 손해가 발생하는 경우에는 이를 배상하여야 한다.');
+              return (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="font-bold text-base mb-1">제7조({c7.title})</h3>
+                  <div className="pl-4 text-base" dangerouslySetInnerHTML={{ __html: c7.html }} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base mb-1">제8조({c8.title})</h3>
+                  <div className="pl-4 text-base" dangerouslySetInnerHTML={{ __html: c8.html }} />
+                </div>
+              </div>);
+            })()}
+
+            {/* ⭐ [단계6]제9~11조*/}
+            {workerStep === 6 && (() => {
+              const c9 = stepClause(9, '의무', '"갑"은 "을"의 근무조건 향상을 위하여 최선을 다하여야 하며, "을"은 신의성실의 원칙에 의하여 근로를 제공하여야 한다. 특히 "을"은 "갑"이 정한 안전에 관한 제 규칙과 지시사항을 위반하여 발생한 제반사고는 "을"의 귀책사유로 한다.');
+              const c10 = stepClause(10, '손해배상', '"을"이 계약기간 중 고의 또는 과실로 "갑"에게 손해를 입힌 때에는 이를 배상하여야 한다.');
+              const c11 = stepClause(11, '기타 근로조건', '본 계약서를 작성함에 있어 "을"은 "갑"의 취업규칙 및 제 규정을 열람하였으며 이 계약에 정함이 없는 사항은 관계법령 및 "갑"의 취업규칙 등에 정한 바에 따르며 상기사실을 확실히 하기 위하여 본 계약서를 2통 작성하여 사용자와 근로자가 각 1통씩 보관키로 한다.');
+              return (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="font-bold text-base mb-1">제9조({c9.title})</h3>
+                  <p className="pl-4 text-base" dangerouslySetInnerHTML={{ __html: c9.html }} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base mb-1">제10조({c10.title})</h3>
+                  <p className="pl-4 text-base" dangerouslySetInnerHTML={{ __html: c10.html }} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base mb-1">제11조({c11.title})</h3>
+                  <p className="pl-4 text-base" dangerouslySetInnerHTML={{ __html: c11.html }} />
+                </div>
+              </div>);
+            })()}
+
+            {/* ⭐ [단계7]전자근로계약 체결 동의서 — ConsentDoc(모듈 스코프)이 조항템플릿 시트
+                 (consent1 키)를 참조. 근로자 화면이라 editingClauseNum 등은 넘기지 않는다. */}
+            {workerStep === 7 && (
+              <div className="space-y-4">
+                <ConsentDoc docIndex={0} formData={formData} clauses={clauses} variant="step" />
+                <p className="font-bold text-center">위 내용에 동의하며 서명합니다.</p>
+                <SignaturePad canvasRef={canvasRef} startDraw={startDraw} moveDraw={moveDraw} setIsDrawing={setIsDrawing} clearCanvas={clearCanvas} />
+              </div>)}
+
+            {/* ⭐ [단계8]연장/야간/휴일근로 동의서 */}
+            {workerStep === 8 && (
+              <div className="space-y-4">
+                <ConsentDoc docIndex={1} formData={formData} clauses={clauses} variant="step" />
+                <p className="font-bold text-center">위 내용에 동의하며 서명합니다.</p>
+                <SignaturePad canvasRef={canvasRef} startDraw={startDraw} moveDraw={moveDraw} setIsDrawing={setIsDrawing} clearCanvas={clearCanvas} />
+              </div>
+            )}
+
+            {/* ⭐ [단계9]동의 및 교부확인 */}
+            {workerStep === 9 && (
+              <div className="space-y-4">
+                <ConsentDoc docIndex={2} formData={formData} clauses={clauses} variant="step" />
+                <p className="font-bold text-center">위 내용에 동의하며 서명합니다.</p>
+                <SignaturePad canvasRef={canvasRef} startDraw={startDraw} moveDraw={moveDraw} setIsDrawing={setIsDrawing} clearCanvas={clearCanvas} />
+              </div>
+            )}
+            
+            {/* ⭐ [단계10]최종 서명*/}
+            {workerStep === 10 && (
+              <div className="space-y-6">
+                <div className="font-bold text-lg text-center bg-yellow-100 p-4 rounded-lg border border-yellow-300">💡 근로자 본인은 위 내용을 충분히 숙지하였으며, 그 내용에 동의하며 근로계약서 사본 또는 부본을 교부받았음을 확인합니다.</div>
+                <div className="bg-white border-2 border-gray-400 p-4 rounded h-96 overflow-y-scroll text-xs leading-relaxed">
+                  <h1 className="text-2xl font-bold text-center mb-6">근 로 계 약 서</h1>
+                  <div className="text-right mb-2 text-sm font-bold">입사일 : {formatDate(formData.joinDate)}</div>
+                  <table className="c-table mb-8 text-sm">
+                    <tbody>
+                      <tr><td rowSpan="3" className="bg-gray-label w-24">사용자<br/>("갑")</td><td className="bg-gray-label w-20">명 칭</td><td className="pl-4 font-bold">{formData.companyName}</td></tr>
+                      <tr><td className="bg-gray-label">주 소</td><td className="pl-4">{formData.companyAddress}</td></tr>
+                      <tr><td className="bg-gray-label">전화번호</td><td className="pl-4">{formData.companyPhone}</td></tr>
+                      <tr><td rowSpan="3" className="bg-gray-label">근로자<br/>(을)</td><td className="bg-gray-label">성명</td><td className="pl-4"><span>{formData.empName}</span> <span className="text-gray-600 ml-2">(주민등록번호: {formData.empRegNumber})</span></td></tr>
+                      <tr><td className="bg-gray-label">주 소</td><td className="pl-4">{formData.empAddress}</td></tr>
+                      <tr><td className="bg-gray-label">연락처</td><td className="pl-4">{formData.empPhone}</td></tr>
+                    </tbody>
+                  </table>
+
+                  <div className="mb-4 border-b border-black pb-2 text-sm"><strong>{formData.companyName}</strong>에 재직 중 근로기준법과 취업규칙 및 제반규정을 성실히 준수할 것을 서약하고 다음과 같이 근로계약을 체결한다.</div>
+                  <ContractArticles formData={formData} clauses={clauses} className="space-y-4 break-keep text-sm" />
+                  <div className="mt-6 space-y-2 text-sm">
+                    {/* ⭐ 제목도 조항템플릿(consent1/2/3)을 참조 — 수정 탭에서 이름을 바꾸면 여기도 같이 바뀐다 */}
+                    <div className="border p-2 relative rounded keep-together"><strong>[{resolveClause('consent1', CONSENT_DOCS[0].fallbackTitle, CONSENT_DOCS[0].fallbackBody, formData, clauses).title}]</strong> 동의함 {signatures.sign1 && <img src={signatures.sign1} className="w-20 absolute top-0 right-2 mix-blend-multiply" alt="sign1"/>}</div>
+                    <div className="border p-2 relative rounded keep-together"><strong>[{resolveClause('consent2', CONSENT_DOCS[1].fallbackTitle, CONSENT_DOCS[1].fallbackBody, formData, clauses).title}]</strong> 동의함 {signatures.sign2 && <img src={signatures.sign2} className="w-20 absolute top-0 right-2 mix-blend-multiply" alt="sign2"/>}</div>
+                    <div className="border p-2 relative rounded keep-together"><strong>[{resolveClause('consent3', CONSENT_DOCS[2].fallbackTitle, CONSENT_DOCS[2].fallbackBody, formData, clauses).title}]</strong> 동의함 {signatures.sign3 && <img src={signatures.sign3} className="w-20 absolute top-0 right-2 mix-blend-multiply" alt="sign3"/>}</div>
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <p className="font-bold text-center mb-2">최종 서명 (계약 체결)</p>
+                  <SignaturePad canvasRef={canvasRef} startDraw={startDraw} moveDraw={moveDraw} setIsDrawing={setIsDrawing} clearCanvas={clearCanvas} />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ⭐ 최종완료버튼*/}
+          <div className="fixed bottom-0 left-0 right-0 p-4 z-20 border-t bg-white flex gap-3 shadow-lg">
+            {workerStep > 1 && <button onClick={()=>setWorkerStep(workerStep-1)} className="flex-1 py-5 bg-gray-200 text-gray-700 font-bold rounded-lg text-lg hover:bg-gray-300">이전</button>}
+            {workerStep < 7 && (<button onClick={() => setWorkerStep(workerStep + 1)} className="py-5 flex-[2] bg-blue-600 text-white font-bold rounded-lg shadow-lg text-lg hover:bg-blue-700 flex justify-center items-center gap-2">다음 내용 확인 <ChevronRight className="ml-2"/></button>)}
+            {workerStep >= 7 && workerStep < 10 && (<button onClick={() => saveSignatureAndNext(`sign${workerStep - 6}`)} className="py-5 flex-[2] bg-green-600 text-white font-bold rounded-lg shadow-lg text-lg hover:bg-green-700 flex justify-center items-center gap-2">서명 저장 후 다음 <ChevronRight className="ml-2"/></button>)}
+            {workerStep === 10 && (<button onClick={finalSubmit} className="py-5 flex-[2] bg-blue-600 text-white font-bold rounded-lg shadow-lg text-lg hover:bg-blue-700 flex justify-center items-center gap-2">최종 제출 및 완료</button>)}
+          </div>
+        </div>
+      )}
+
+      {/* ⭐ (관리자)작성 화면 - 패널 */}
+      <div className="w-full relative bg-gray-200 min-h-screen flex flex-col">
+        {(step === 1 || (step === 3 && isManagerView && contractStatus === 'SIGNED_BY_WORKER')) && (
+          <div className="sidebar print-hidden shadow-lg">
+            {step === 1 ? (
+              <>
+                <h2 className="text-xl font-bold mb-6 text-blue-900 flex items-center"><PenTool className="mr-2"/> 고용주 근로계약서 작성</h2>
+
+                {/* ⭐ 작성/수정/설정 탭 */}
+                <div className="flex gap-1 mb-6 border-b border-gray-200">
+                  {['작성', '수정', '설정'].map(tab => (
+                    <button
+                      key={tab}
+                      onClick={() => setAdminTab(tab)}
+                      className={`px-4 py-2 text-sm font-bold rounded-t-lg -mb-px border-b-2 ${adminTab === tab ? 'border-blue-600 text-blue-600 bg-blue-50' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                    >
+                      {tab}
+                    </button>
+                  ))}
+                </div>
+
+                {adminTab === '작성' && (
+                <div className="space-y-6 text-sm">
+                  
+                  {/* 1. 기본 정보 */}
+                  <div className="space-y-4">
+                    <div>
+                      <label className="font-bold text-gray-700 mb-1 block">계약 법인</label>
+                      <select name="companySelect" className="w-full p-2 border rounded bg-white font-bold text-blue-900" onChange={handleChange} value={formData.companyName}>
+                        {companies.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="font-bold text-gray-700 mb-1 block">입사일</label>
+                      <input type="date" name="joinDate" className="w-full p-2 border rounded bg-gray-50" value={formData.joinDate} onChange={handleChange}/>
+                    </div>
+                  </div>
+
+                  {/* 2. 계약 형태 */}
+                  <div className="p-4 bg-blue-50 rounded border border-blue-200">
+                    <h3 className="font-bold text-blue-800 mb-2">계약 형태</h3>
+                    <div className="flex gap-6 mb-3">
+                        <label className="flex items-center cursor-pointer"><input type="radio" name="contractType" value="regular" checked={formData.contractType==='regular'} onChange={handleChange} className="mr-2"/> 정규직</label>
+                        <label className="flex items-center cursor-pointer"><input type="radio" name="contractType" value="contract" checked={formData.contractType==='contract'} onChange={handleChange} className="mr-2"/> 계약직</label>
+                    </div>
+                    
+                    {formData.contractType === 'contract' && (
+                        <div className="flex items-center gap-2 mb-3 bg-white p-2 rounded border">
+                            <select name="contractMonths" className="w-24 p-2 border text-sm" value={formData.contractMonths} onChange={handleChange}><option value="">선택</option><option value="direct">직접</option><option value="3">3개월</option><option value="6">6개월</option><option value="12">1년</option></select>
+                            <input type="date" name="endDate" className="flex-1 p-2 border text-sm" value={formData.endDate} onChange={handleChange} readOnly={formData.contractMonths!=='direct'}/>
+                        </div>
+                    )}
+
+                    <div className="border-t border-blue-200 pt-3">
+                        <label className="flex items-center font-bold text-gray-700 mb-2 cursor-pointer"><input type="checkbox" name="useProbation" checked={formData.useProbation} onChange={handleChange} className="mr-2"/>수습 적용</label>
+                        {formData.useProbation && (
+                            <div className="flex flex-col gap-2 bg-white p-2 rounded border">
+                                <div className="flex items-center gap-2">
+                                    <input type="date" name="probationStartDate" className="w-1/3 p-1 border text-sm" value={formData.probationStartDate} onChange={handleChange}/>
+                                    <span>~</span>
+                                    <input type="date" name="probationEndDate" className="w-1/3 p-1 border text-sm bg-gray-100" value={formData.probationEndDate} readOnly/>
+                                    <select name="probationMonths" className="flex-1 p-1 border text-sm" value={formData.probationMonths} onChange={handleChange}><option value="1">1개월</option><option value="2">2개월</option><option value="3">3개월</option><option value="6">6개월</option></select>
+                                </div>
+                                <input type="text" name="probationSalary" className="w-full p-2 border text-sm" value={formData.probationSalary} onChange={handleChange} placeholder="수습급여 (예: 2,000,000)"/>
+                            </div>
+                        )}
+                    </div>
+                  </div>
+
+                  {/* 3. 근무장소 및 업무 */}
+                  <div className="border-t pt-4">
+                    <h3 className="font-bold text-gray-800 mb-2">1. 근무장소 및 업무</h3>
+                    <div className="flex gap-2 mb-2">
+                        <input type="text" name="workPlace" className="w-1/2 p-2 border rounded" value={formData.workPlace} onChange={handleChange} placeholder="근무장소"/>
+                        <select name="dutiesSelect" className="w-1/2 p-2 border rounded" value={formData.isDirectDuties ? '직접입력' : formData.duties} onChange={handleChange}>
+                            <option value="사무직">사무직</option><option value="영업직">영업직</option><option value="생산직">생산직</option><option value="직접입력">직접입력</option>
+                        </select>
+                    </div>
+                    {formData.isDirectDuties && <input type="text" name="dutiesDirect" className="w-full p-2 border rounded" value={formData.dutiesDirect} onChange={handleChange} placeholder="담당업무 입력" />}
+                  </div>
+
+                  {/* 4. 근로시간 및 휴게시간 */}
+                  <div className="border-t pt-4">
+                    <h3 className="font-bold text-gray-800 mb-2">2. 근로/휴게시간</h3>
+                    <div className="bg-blue-50 p-4 rounded border border-blue-200 space-y-4">
+                      {!formData.isBiweekly ? (
+                        <>
+                          <div className="flex gap-4 items-end">
+                            <div className="flex-1">
+                              <label className="text-gray-600 text-xs block mb-1 font-bold">1일 근로시간</label>
+                              <div className="flex items-center gap-1">
+                                <input type="number" name="dailyWorkHours" className="w-full p-2 border rounded text-right font-bold" value={formData.dailyWorkHours} onChange={handleChange}/>
+                                <span className="text-sm shrink-0">시간</span> 
+                              </div>
+                            </div>
+                            <div className="flex-1">
+                              <label className="text-gray-600 text-xs block mb-1 font-bold">주 근무일수</label>
+                              <div className="flex items-center gap-1">
+                                <input type="number" name="weeklyWorkDays" className="w-full p-2 border rounded text-right font-bold" value={formData.weeklyWorkDays} onChange={handleChange}/>
+                                <span className="text-sm shrink-0">일</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* (시업 ~ 종업) */}
+                          <div>
+                            <label className="text-gray-600 text-xs block mb-1 font-bold">근무 시간 (시업 ~ 종업)</label>
+                            <div className="flex items-center gap-2">
+                              <input type="time" name="startTime" className="w-1/2 p-2 border rounded text-sm font-bold" value={formData.startTime} onChange={handleChange}/>
+                              <span className="text-gray-400">~</span>
+                              <input type="time" name="endTime" className="w-1/2 p-2 border rounded text-sm font-bold" value={formData.endTime} onChange={handleChange}/>
+                            </div>
+                          </div>
+
+                          {/* 휴게 시간 */}
+                          <div className="bg-white p-3 rounded border">
+                            <label className="font-bold text-gray-600 text-xs block mb-1">휴게 시간</label>
+                            <div className="flex flex-col gap-2">
+                              <div className="flex-1 flex items-center gap-1">
+                                <span className="text-sm shrink-0">총</span>
+                                <input type="text" name="breakTimeMinutes" className="w-12 p-2 border rounded text-center text-sm font-bold" value={formData.breakTimeMinutes} onChange={handleChange}/>
+                                <span className="text-sm shrink-0 mr-1">분</span>
+                              </div>
+                              <div className="flex-1 flex items-center gap-1">
+                                <input type="time" name="breakTimeStart" className="w-full p-2 border rounded text-sm font-bold" value={formData.breakTimeStart} onChange={handleChange}/>
+                                <span className="text-gray-300">~</span>
+                                <input type="time" name="breakTimeEnd" className="w-full p-2 border rounded text-sm font-bold" value={formData.breakTimeEnd} onChange={handleChange}/>
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+
+                      <div className="space-y-3 bg-white p-3 rounded border border-blue-300">
+                        <p className="text-xs text-blue-600 font-bold mb-1">※ 아래 적으신 내용이 계약서 표에 그대로 출력됩니다.</p>
+                        <div>
+                          <label className="text-gray-600 text-xs block mb-1 font-bold">1주간 (구분란)</label>
+                          <input type="text" name="customScheduleWeek" value={formData.customScheduleWeek || ''} onChange={handleChange} className="w-full p-2 border rounded text-sm" placeholder="예: 격주 휴무 등" />
+                        </div>
+                        <div>
+                          <label className="text-gray-600 text-xs block mb-1 font-bold">근로시간 (시업~종업)</label>
+                          <textarea name="customScheduleWork" value={formData.customScheduleWork || ''} onChange={handleChange} className="w-full p-2 border rounded text-sm h-16" placeholder="예: 1주: 08:00~17:00&#10;2주: 08:00~12:00" />
+                        </div>
+                        <div>
+                          <label className="text-gray-600 text-xs block mb-1 font-bold">휴게시간</label>
+                          <textarea name="customScheduleBreak" value={formData.customScheduleBreak || ''} onChange={handleChange} className="w-full p-2 border rounded text-sm h-16" placeholder="예: 1주: 60분&#10;2주: 없음" />
+                        </div>
+                      </div>
+                      )}
+
+                      <div className="pt-2 border-t border-blue-200">
+                        <label className="flex items-center gap-2 text-sm font-bold text-gray-800 cursor-pointer w-fit">
+                          <input 
+                            type="checkbox" 
+                            name="isBiweekly" 
+                            checked={formData.isBiweekly || false} 
+                            onChange={e => setFormData({...formData, isBiweekly: e.target.checked})} 
+                            className="w-4 h-4 text-blue-600"
+                          />
+                        </label>
+                      </div>
+
+                    </div>
+                  </div>
+
+                  {/* 5. 근로자 발송 정보 */}
+                  <div className="p-4 bg-green-50 rounded border border-green-100">
+                    <h3 className="font-bold text-green-800 mb-3">근로자 발송 정보</h3>
+
+                    {workerList.map((w, i) => (
+                        <div key={i} className="mb-4 p-4 bg-white border rounded shadow-sm relative pt-12">
+                          <div className="absolute top-0 left-0 right-0 px-3 py-2 flex justify-between items-center border-b border-gray-50 bg-gray-50/50 rounded-t">
+                            <span className="text-xs font-bold text-blue-600">근로자 {i + 1}</span>
+                            <div className="flex items-center gap-3">
+                              {/* ⭐ 발송 방식을 근로자 카드별로 선택 (예전엔 전체 공통 1개였음) */}
+                              <div className="flex gap-2 text-xs">
+                                <label className="flex items-center cursor-pointer">
+                                  <input type="radio" name={`mode-${i}`} value="email" checked={(w.mode || 'email') === 'email'} onChange={() => { const n=[...workerList]; n[i].mode='email'; setWorkerList(n); }} className="mr-1"/>이메일
+                                </label>
+                                <label className="flex items-center cursor-pointer">
+                                  <input type="radio" name={`mode-${i}`} value="sms" checked={w.mode === 'sms'} onChange={() => { const n=[...workerList]; n[i].mode='sms'; setWorkerList(n); }} className="mr-1"/>문자
+                                </label>
+                              </div>
+                              {workerList.length > 1 && (
+                                <button onClick={() => removeWorker(i)} className="text-gray-400 hover:text-red-500 font-bold text-xl leading-none">×</button>
+                              )}
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <input placeholder="성 명" value={w.name} onChange={e=>{const n=[...workerList];n[i].name=e.target.value;setWorkerList(n)}} className="border p-2 w-full rounded text-sm"/>
+                            <input placeholder="전화번호" value={w.password} onChange={e=>{const n=[...workerList];n[i].password=autoHyphenPhone(e.target.value);setWorkerList(n)}} className="border p-2 w-full rounded text-sm bg-yellow-50"/>
+                            {(w.mode || 'email') === 'email' && (<input placeholder="이메일" value={w.email} onChange={e=>{const n=[...workerList];n[i].email=e.target.value;setWorkerList(n)}} className="border p-2 w-full rounded text-sm"/>)}
+                          </div>
+                        </div>
+                    ))}
+
+                    <button onClick={addWorker} className="w-full text-blue-600 border border-blue-300 bg-white py-2 rounded mt-2 hover:bg-blue-50 font-bold">+ 근로자 추가</button>
+                  </div>
+
+                  <button onClick={handleSend} className="w-full py-4 bg-blue-600 text-white font-bold rounded-lg shadow-lg hover:bg-blue-700 flex justify-center items-center text-lg"><Send className="mr-2"/> 발송하기</button>
+                </div>
+                )}
+
+                {adminTab === '설정' && (
+                  <>
+                    <SettingsPanel companies={companies} setCompanies={setCompanies} defaults={defaults} setDefaults={setDefaults} />
+                    <MessageTemplateEditor messageTemplate={messageTemplate} setMessageTemplate={setMessageTemplate} />
+                  </>
+                )}
+                {adminTab === '수정' && (
+                  <ClauseEditorPanel
+                    clauses={clauses}
+                    setClauses={setClauses}
+                    editingClauseNum={editingClauseNum}
+                    setEditingClauseNum={setEditingClauseNum}
+                    editableTitleRef={editableTitleRef}
+                    editableBodyRef={editableBodyRef}
+                    draggedChipRef={draggedChipRef}
+                  />
+                )}
+              </>
+            ) : (
+              <div className="flex flex-col items-center w-full h-full justify-center mt-20">
+                  <div className="mb-4 bg-blue-100 p-4 rounded-full">
+                    <PenTool className="w-10 h-10 text-blue-600"/>
+                  </div>
+
+                  {/* ⭐ (관리자)최종 승인 요청 */}
+                  <h2 className="text-2xl font-bold text-gray-800 mb-2">관리자 승인 대기</h2>
+                  <p className="text-gray-500 mb-6 break-keep text-center">
+                    근로자 서명이 완료되었습니다.<br/>
+                    계약 내용을 최종 확인하신 후 아래 버튼을 눌러 승인(직인 날인)해 주세요.
+                  </p>
+                  <button onClick={managerApprove} className="w-full px-6 py-4 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 shadow-lg text-lg">
+                      승인 및 직인 날인
+                  </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ⭐ 완성본*/}
+        {(step === 1 || (step === 3 && !(contractStatus === 'SIGNED_BY_WORKER' && !isManagerView))) && (
+          <div className={`main-preview ${(step === 1 || (step === 3 && isManagerView && contractStatus === 'SIGNED_BY_WORKER')) ? 'has-sidebar' : ''} ${(step === 3 && contractStatus === 'COMPLETED') ? 'hidden print:flex' : ''}`} id="print-area">
+            <div className="a4-page mobile-scale relative">
+              <h1 className="text-4xl font-extrabold text-center mb-10 underline tracking-widest">근 로 계 약 서</h1>
+              <div className="text-right text-sm mb-4 font-bold">입사일 : {formatDate(formData.joinDate)}</div>
+              
+              <table className="c-table mb-8 text-sm">
+                <tbody>
+                  <tr><td rowSpan="3" className="bg-gray-label w-24">사용자<br/>("갑")</td><td className="bg-gray-label w-20">명 칭</td><td className="pl-4 font-bold">{formData.companyName}</td></tr>
+                  <tr><td className="bg-gray-label">주 소</td><td className="pl-4">{formData.companyAddress}</td></tr>
+                  <tr><td className="bg-gray-label">전화번호</td><td className="pl-4">{formData.companyPhone}</td></tr>
+                  <tr><td rowSpan="3" className="bg-gray-label">근로자<br/>("을")</td><td className="bg-gray-label">성 명</td><td className="pl-4"><span>{formData.empName}</span> <span className="text-gray-600 ml-2">(주민등록번호: {formData.empRegNumber})</span></td></tr>
+                  <tr><td className="bg-gray-label">주 소</td><td className="pl-4">{formData.empAddress}</td></tr>
+                  <tr><td className="bg-gray-label">연락처</td><td className="pl-4">{formData.empPhone}</td></tr>
+                </tbody>
+              </table>
+
+              <div className="mb-8 border-b border-black pb-4 text-base"><strong>{formData.companyName}</strong>에 재직 중 근로기준법과 취업규칙 및 제반규정을 성실히 준수할 것을 서약하고 다음과 같이 근로계약을 체결한다.</div>
+              
+              <ContractArticles
+                formData={formData}
+                clauses={clauses}
+                className="space-y-6 text-sm leading-relaxed text-justify break-keep"
+                editingClauseNum={(step === 1 && adminTab === '수정') ? editingClauseNum : null}
+                editableTitleRef={editableTitleRef}
+                editableBodyRef={editableBodyRef}
+                draggedChipRef={draggedChipRef}
+              />
+
+              <div className="mt-8 space-y-6 text-sm leading-relaxed text-justify break-keep">
+                {/* ⭐ 3종 동의서 — ConsentDoc(모듈 스코프)이 조항템플릿 시트(consent1/2/3 키)를
+                     참조. 수정 탭에서 고르면 이 화면에서 바로 수정 가능(editingClauseNum 전달). */}
+                <ConsentDoc
+                  docIndex={0} formData={formData} clauses={clauses} variant="full"
+                  empName={formData.empName} signatureImg={signatures.sign1}
+                  editingClauseNum={(step === 1 && adminTab === '수정') ? editingClauseNum : null}
+                  editableTitleRef={editableTitleRef} editableBodyRef={editableBodyRef} draggedChipRef={draggedChipRef}
+                />
+                <ConsentDoc
+                  docIndex={1} formData={formData} clauses={clauses} variant="full"
+                  empName={formData.empName} signatureImg={signatures.sign2}
+                  editingClauseNum={(step === 1 && adminTab === '수정') ? editingClauseNum : null}
+                  editableTitleRef={editableTitleRef} editableBodyRef={editableBodyRef} draggedChipRef={draggedChipRef}
+                />
+                <ConsentDoc
+                  docIndex={2} formData={formData} clauses={clauses} variant="full"
+                  empName={formData.empName} signatureImg={signatures.sign3}
+                  editingClauseNum={(step === 1 && adminTab === '수정') ? editingClauseNum : null}
+                  editableTitleRef={editableTitleRef} editableBodyRef={editableBodyRef} draggedChipRef={draggedChipRef}
+                />
+              </div>
+
+              <div className="mt-12 mb-8 font-bold text-base break-keep leading-relaxed keep-together">
+                근로자 본인은 위 내용을 충분히 숙지하였으며, 그 내용에 동의하며 근로계약서 사본 또는 부본을 교부받았음을 확인합니다.
+              </div>
+
+              <div className="mt-16 text-center keep-together">
+                <div className="text-xl font-bold mb-12 tracking-widest">{formatDate(formData.joinDate)}</div>
+                <div className="px-10 text-lg font-bold">
+                  <div className="text-right mb-8 relative">
+                    <span className="mr-4">("갑")</span> 
+                    <span className="mr-2">{formData.companyName}</span> 
+                    <span className="mr-2">대표이사</span> 
+                    <span className="mr-2">{formData.repName}</span>
+                    <span className="text-gray-400 relative inline-block">
+                      (인)
+                      {contractStatus === 'COMPLETED' && sealImages[formData.companyName] && (
+                        <img src={sealImages[formData.companyName]} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[109px] h-[109px] max-w-none object-contain mix-blend-multiply opacity-80" alt="직인" />
+                      )}
+                    </span>
+                  </div>
+                  <div className="text-right relative mt-8">
+                    <span className="mr-4 font-bold">("을")</span>
+                    <span className="mr-2">성 명 :</span>
+                    <span className="mr-4 inline-block min-w-[80px] text-center border-b border-black font-bold">{formData.empName}</span>
+                    <span className="text-gray-400 text-sm relative inline-block mr-4">(서명 또는 인)
+                      {signatures.sign4 && <img src={signatures.sign4} className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-28 h-auto max-w-none object-contain mix-blend-multiply" alt="최종서명"/>}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ⭐ 근로자 전송 완료&최종 계약 완료*/}
+        {step === 3 && (contractStatus === 'COMPLETED' || (!isManagerView && contractStatus === 'SIGNED_BY_WORKER')) && (
+            <div className="w-full min-h-screen bg-gray-100 flex flex-col justify-center items-center p-6 z-10 text-center print:hidden">
+                {contractStatus === 'COMPLETED' ? (
+                    <div className="flex flex-col items-center w-full max-w-sm">
+                      <CheckCircle className="w-16 h-16 text-green-500 mb-4"/>
+                      <h2 className="text-2xl font-bold text-gray-800 mb-2">계약 완료</h2>
+                      <p className="text-gray-500 mb-6 break-keep">최종 승인 및 직인 날인이 완료되었습니다.</p>
+                      <button onClick={()=>{const isWebView = /KAKAOTALK|NAVER|Daum|Instagram|Line/i.test(navigator.userAgent);
+                        if (isWebView) { alert("현재 사용 중인 메일 앱 내부에서는 PDF 저장이 차단되어 있습니다.\n다른 브라우저(Safari, Chrome)를 이용해 주세요."); }
+                        window.print();}}
+                        className="w-full px-6 py-4 bg-gray-800 text-white rounded-lg font-bold hover:bg-gray-900 shadow-lg text-lg">
+                          <Printer className="inline mr-2"/> PDF 저장
+                      </button>
+                    </div>
+                ) : (
+                    <div className="flex flex-col items-center w-full max-w-sm">
+                        <div className="mb-4 bg-yellow-100 p-4 rounded-full"><Lock className="w-10 h-10 text-yellow-600"/></div>
+                        <h2 className="text-2xl font-bold text-gray-800 mb-2">전송 완료</h2>
+                        <p className="text-gray-500 font-bold mb-2">담당자에게 서명된 계약서가 전달되었습니다.</p>
+                        <p className="text-sm text-gray-400">최종 승인 및 직인 날인이 끝나면 완료 링크를 문자 또는 메일로 보내드립니다.</p>
+                    </div>
+                )}
+            </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+ReactDOM.render(<App />, document.getElementById('root'));
+</script>
+</body>
+</html>
