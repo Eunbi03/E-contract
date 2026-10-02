@@ -1088,7 +1088,10 @@
     google.script.run.withSuccessHandler(res => {
       setLoading(false);
       // ⭐ 대량 발송 시 일부는 즉시, 나머지는 몇 분 간격으로 자동으로 이어서 발송된다(processSendQueue).
-      if (res && res.queuedRemaining > 0) {
+      //   실패(failNow)가 있으면 queuedRemaining이 0이어도 "발송 완료"로 뜨면 안 되므로 반드시 먼저 체크한다.
+      if (res && res.failNow > 0) {
+        alert(`⚠ 발송 실패 있음: 총 ${res.totalCount}명 중 ${res.failNow}명 발송 실패.${res.sentNow ? ` (${res.sentNow}명 성공)` : ''}${res.queuedRemaining ? `\n나머지 ${res.queuedRemaining}명은 잠시 후 순차 발송됩니다.` : ''}\n'발송큐' 시트에서 FAILED 항목의 사유를 확인해 주세요.`);
+      } else if (res && res.queuedRemaining > 0) {
         alert(`발송 시작됨: 총 ${res.totalCount}명 중 ${res.sentNow}명 즉시 발송 완료.\n나머지 ${res.queuedRemaining}명은 잠시 후부터 순차적으로 자동 발송됩니다.`);
       } else {
         alert(`발송 완료! (총 ${res ? res.totalCount : workerList.length}명)`);
