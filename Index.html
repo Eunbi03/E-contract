@@ -1885,11 +1885,13 @@
                     <span className="mr-4">("갑")</span> 
                     <span className="mr-2">{formData.companyName}</span> 
                     <span className="mr-2">대표이사</span> 
-                    <span className="mr-2">{formData.repName}</span> 
-                    <span className="text-gray-400">(인)</span>
-                    {contractStatus === 'COMPLETED' && sealImages[formData.companyName] && (
-                      <img src={sealImages[formData.companyName]} className="absolute -top-4 -right-8 w-18 h-18 mix-blend-multiply opacity-80" alt="직인" />
-                    )}
+                    <span className="mr-2">{formData.repName}</span>
+                    <span className="text-gray-400 relative inline-block">
+                      (인)
+                      {contractStatus === 'COMPLETED' && sealImages[formData.companyName] && (
+                        <img src={sealImages[formData.companyName]} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 object-contain mix-blend-multiply opacity-80" alt="직인" />
+                      )}
+                    </span>
                   </div>
                   <div className="text-right relative mt-8">
                     <span className="mr-4 font-bold">("을")</span>
