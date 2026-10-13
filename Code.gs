@@ -79,7 +79,7 @@ var SEND_QUOTA_RETRY_MS = 60 * 60 * 1000;     // 일일 메일 한도 초과 시
 function sendBatchContracts(commonData, workerList) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var draftSheet = ss.getSheetByName('계약대기') || ss.insertSheet('계약대기');
-  if (draftSheet.getLastRow() === 0) draftSheet.appendRow(['ID', '데이터', '발송시간', '대상자이메일', '전화번호']);
+  if (draftSheet.getLastRow() === 0) draftSheet.appendRow(['ID', '법인', '성명', '전화번호', '이메일', '발송시간', '데이터']);
 
   var queueSheet = ss.getSheetByName('발송큐') || ss.insertSheet('발송큐');
   if (queueSheet.getLastRow() === 0) {
@@ -113,7 +113,7 @@ function sendBatchContracts(commonData, workerList) {
 
     // ⭐ 추측 불가능한 ID 발급 (기존 "법인코드-이름-순번-날짜" 방식은 URL을 쉽게 유추/전수조사할 수 있어 변경)
     var uniqueId = Utilities.getUuid();
-    draftRows.push([uniqueId, JSON.stringify(individualData), nowStr, worker.email, worker.password]);
+    draftRows.push([uniqueId, commonData.companyName || '', worker.name || '', worker.password || '', worker.email || '', nowStr, JSON.stringify(individualData)]);
 
     var link = urlBase + "?id=" + uniqueId;
     queueRows.push([
@@ -273,14 +273,14 @@ function findRowById(sheet, id, idCol) {
   return null;
 }
 
-// ⭐ 계약목록 시트는 id가 별도 열이 아니라 J열(인덱스 10) JSON 데이터 안 contractId 필드에
+// ⭐ 계약목록 시트는 id가 별도 열이 아니라 J열(인덱스 9) JSON 데이터 안 contractId 필드에
 //   들어있어 findRowById와는 다른 방식으로 찾아야 한다.
 function findContractIdInList(listSheet, id) {
   if (!listSheet) return null;
   var data = listSheet.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
     try {
-      var parsed = JSON.parse(data[i][10]);
+      var parsed = JSON.parse(data[i][9]);
       if (String(parsed.contractId) === String(id)) return parsed;
     } catch (e) {}
   }
@@ -311,7 +311,7 @@ function loadDraftData(id) {
   var row = findRowById(ss.getSheetByName('계약대기'), id, 0);
   if (!row) return null;
   try {
-    var parsed = JSON.parse(row[1]);
+    var parsed = JSON.parse(row[6]);
     // ⭐ 본인인증 전에 비밀번호(전화번호)를 클라이언트로 절대 내려보내지 않는다.
     //   verifyIdentity()가 서버에서만 비교하도록 분리했다.
     delete parsed.contractPassword;
@@ -328,7 +328,7 @@ function verifyIdentity(id, inputPassword) {
   var row = findRowById(SpreadsheetApp.getActiveSpreadsheet().getSheetByName('계약대기'), id, 0);
   if (!row) return false;
   try {
-    var parsed = JSON.parse(row[1]);
+    var parsed = JSON.parse(row[6]);
     var cleanStored = String(parsed.contractPassword || '').replace(/[^0-9]/g, '');
     return !!cleanStored && cleanInput === cleanStored;
   } catch (e) {
@@ -342,7 +342,7 @@ function loadSignedData(id) {
 
   var row = findRowById(ss.getSheetByName('승인대기'), id, 0);
   if (row) {
-    try { return JSON.parse(row[1]); } catch (e) {}
+    try { return JSON.parse(row[8]); } catch (e) {}
   }
 
   return findContractIdInList(ss.getSheetByName('계약목록'), id);
@@ -363,7 +363,7 @@ function saveContractData(data) {
   var targetSheet = ss.getSheetByName('승인대기') || ss.insertSheet('승인대기');
 
   // ⭐ 승인대기 시트 목록
-  if (targetSheet.getLastRow() === 0) targetSheet.appendRow(['ID', '완료데이터(JSON)', '현황', '수신시간', '승인링크']);
+  if (targetSheet.getLastRow() === 0) targetSheet.appendRow(['ID', '법인', '성명', '전화번호', '이메일', '수신시간', '현황', '승인링크', '완료데이터(JSON)']);
 
   var uniqueId = data.contractId;
   data.status = 'SIGNED_BY_WORKER';
@@ -375,7 +375,10 @@ function saveContractData(data) {
 
   withLock(function () {
     // ⭐ 승인대기 시트 저장 데이터 설정
-    targetSheet.appendRow([uniqueId, JSON.stringify(data), 'SIGNED_BY_WORKER', new Date(), viewLink]);
+    targetSheet.appendRow([
+      uniqueId, data.companyName || '', data.empName || '', data.empPhone || '', data.workerContactEmail || '',
+      new Date(), 'SIGNED_BY_WORKER', viewLink, JSON.stringify(data)
+    ]);
     deleteRowById(ss.getSheetByName('계약대기'), uniqueId, 0);
   });
   return "Success";
@@ -388,9 +391,10 @@ function approveContract(data) {
   data.approvedAt = new Date().toLocaleString();
   var listSheet = ss.getSheetByName('계약목록') || ss.insertSheet('계약목록');
 
-  // ⭐ 계약목록 시트 목록
+  // ⭐ 계약목록 시트 목록 — 주민등록번호는 별도 열로 두지 않는다(민감정보라 한눈에 보이는
+  //   목록에는 안 올리는 편이 안전). 필요하면 마지막 "데이터(JSON)" 열 안에 그대로 들어있다.
   if (listSheet.getLastRow() === 0) {
-    listSheet.appendRow(['법인', '성명', '연락처', '주민등록번호', '주소', '입사일', '문서링크', '발송일시', '제출일시', '완료일시', '데이터(JSON)']);
+    listSheet.appendRow(['법인', '성명', '전화번호', '주소', '입사일', '발송일시', '제출일시', '완료일시', '문서링크', '데이터(JSON)']);
   }
 
   var viewLink = ScriptApp.getService().getUrl() + "?id=" + data.contractId + "&mode=view";
@@ -398,8 +402,8 @@ function approveContract(data) {
   withLock(function () {
     // ⭐ 계약목록 시트 저장 데이터 설정
     listSheet.appendRow([
-      data.companyName, data.empName, data.empPhone, data.empRegNumber, data.empAddress,
-      data.joinDate, viewLink, data.sentAt || "", data.workerSignedAt || "", data.approvedAt, JSON.stringify(data)
+      data.companyName, data.empName, data.empPhone, data.empAddress, data.joinDate,
+      data.sentAt || "", data.workerSignedAt || "", data.approvedAt, viewLink, JSON.stringify(data)
     ]);
     deleteRowById(ss.getSheetByName('승인대기'), data.contractId, 0);
   });
@@ -837,4 +841,114 @@ function sendSolapiMessage(to, from, text) {
     throw new Error('Solapi 전송 거부: ' + reasons + ' (발신번호가 Solapi에 등록되어 있는지 확인해주세요)');
   }
   return result;
+}
+
+// ======================================================================
+// ⭐ 일회성 마이그레이션 — "계약대기"/"승인대기"/"계약목록" 시트를 새 열 구성으로
+//   재배열한다. 배포 후 Apps Script 편집기 상단의 함수 선택 드롭다운에서
+//   migrateSheetsToNewLayout을 고르고 ▶ 실행 버튼을 한 번만 누르면 된다.
+//   이미 새 레이아웃인 시트는 건드리지 않으므로(헤더로 판별) 여러 번 실행해도 안전하다.
+//   기존 행은 지우지 않고 그 안의 JSON 데이터에서 값을 다시 뽑아 새 열 순서로 옮겨 적는다.
+// ======================================================================
+
+// ⭐ 한 행(배열) 안에서 JSON 객체로 파싱되는 셀을 찾는다 — 이전 레이아웃마다 그 열의
+//   위치가 달라서, 위치를 가정하지 않고 "{"로 시작해서 JSON.parse가 성공하는 셀을 찾는
+//   방식으로 어떤 예전 레이아웃이었든 안전하게 돌 수 있게 한다.
+function extractJsonFromRow_(row) {
+  for (var i = 0; i < row.length; i++) {
+    var cell = row[i];
+    if (typeof cell === 'string' && cell.trim().charAt(0) === '{') {
+      try {
+        var parsed = JSON.parse(cell);
+        if (parsed && typeof parsed === 'object') return { index: i, data: parsed };
+      } catch (e) { /* JSON이 아닌 중괄호 문자열이면 건너뜀 */ }
+    }
+  }
+  return null;
+}
+
+function migrateSheetsToNewLayout() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  return withLock(function () {
+    var result = {
+      계약대기: migrateDraftSheet_(ss),
+      승인대기: migratePendingSheet_(ss),
+      계약목록: migrateListSheet_(ss)
+    };
+    Logger.log('마이그레이션 결과: ' + JSON.stringify(result));
+    return result;
+  });
+}
+
+function migrateDraftSheet_(ss) {
+  var sheet = ss.getSheetByName('계약대기');
+  if (!sheet || sheet.getLastRow() < 1) return '시트 없음';
+  var data = sheet.getDataRange().getValues();
+  if (String(data[0][1]) === '법인') return '이미 최신 레이아웃';
+
+  var newRows = [['ID', '법인', '성명', '전화번호', '이메일', '발송시간', '데이터']];
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    if (!row[0]) continue;
+    var found = extractJsonFromRow_(row);
+    var d = found ? found.data : {};
+    var jsonStr = found ? row[found.index] : JSON.stringify(d);
+    newRows.push([
+      row[0], d.companyName || '', d.empName || '', d.contractPassword || d.empPhone || '',
+      d.workerContactEmail || '', d.sentAt || '', jsonStr
+    ]);
+  }
+  sheet.clear();
+  sheet.getRange(1, 1, newRows.length, newRows[0].length).setValues(newRows);
+  return (newRows.length - 1) + '행 변환';
+}
+
+function migratePendingSheet_(ss) {
+  var sheet = ss.getSheetByName('승인대기');
+  if (!sheet || sheet.getLastRow() < 1) return '시트 없음';
+  var data = sheet.getDataRange().getValues();
+  if (String(data[0][1]) === '법인') return '이미 최신 레이아웃';
+
+  var urlBase = ScriptApp.getService().getUrl();
+  var newRows = [['ID', '법인', '성명', '전화번호', '이메일', '수신시간', '현황', '승인링크', '완료데이터(JSON)']];
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    if (!row[0]) continue;
+    var found = extractJsonFromRow_(row);
+    var d = found ? found.data : {};
+    var jsonStr = found ? row[found.index] : JSON.stringify(d);
+    // ⭐ 승인링크는 mode=review로 새로 발급한다 — 예전 mode=view 링크는 비밀번호 게이트를
+    //   거치지 않으므로, 마이그레이션하면서 같이 고쳐둔다.
+    newRows.push([
+      row[0], d.companyName || '', d.empName || '', d.empPhone || '', d.workerContactEmail || '',
+      d.workerSignedAt || '', d.status || 'SIGNED_BY_WORKER', urlBase + "?id=" + row[0] + "&mode=review", jsonStr
+    ]);
+  }
+  sheet.clear();
+  sheet.getRange(1, 1, newRows.length, newRows[0].length).setValues(newRows);
+  return (newRows.length - 1) + '행 변환';
+}
+
+function migrateListSheet_(ss) {
+  var sheet = ss.getSheetByName('계약목록');
+  if (!sheet || sheet.getLastRow() < 1) return '시트 없음';
+  var data = sheet.getDataRange().getValues();
+  if (String(data[0][2]) === '전화번호') return '이미 최신 레이아웃';
+
+  var urlBase = ScriptApp.getService().getUrl();
+  var newRows = [['법인', '성명', '전화번호', '주소', '입사일', '발송일시', '제출일시', '완료일시', '문서링크', '데이터(JSON)']];
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var found = extractJsonFromRow_(row);
+    if (!found) continue; // JSON 데이터를 못 찾으면(빈 행 등) 건너뜀
+    var d = found.data;
+    newRows.push([
+      d.companyName || '', d.empName || '', d.empPhone || '', d.empAddress || '', d.joinDate || '',
+      d.sentAt || '', d.workerSignedAt || '', d.approvedAt || '',
+      urlBase + "?id=" + (d.contractId || '') + "&mode=view", row[found.index]
+    ]);
+  }
+  sheet.clear();
+  sheet.getRange(1, 1, newRows.length, newRows[0].length).setValues(newRows);
+  return (newRows.length - 1) + '행 변환';
 }
