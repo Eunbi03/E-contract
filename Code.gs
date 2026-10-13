@@ -25,6 +25,47 @@ function withLock(fn) {
   }
 }
 
+// ⭐ 관리자 비밀번호 — 작성/수정/설정 탭과 승인(직인 날인) 화면 진입을 막는다.
+//   평문이 아니라 해시로만 스크립트 속성에 저장한다(스프레드시트 공동편집자 등이 스크립트
+//   속성을 열어봐도 원문이 바로 보이지 않도록). 최초 호출 시 비밀번호가 설정돼 있지 않으면
+//   DEFAULT_ADMIN_PASSWORD로 자동 초기화한다 — 이 기본값은 "관리" 탭에서 바로 바꿀 수 있고,
+//   사용법 설명서에는 적지 않는다.
+var DEFAULT_ADMIN_PASSWORD = 'Bodam5847!!';
+
+function hashAdminPassword_(plain) {
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(plain || ''), Utilities.Charset.UTF_8);
+  return Utilities.base64Encode(bytes);
+}
+
+function getAdminPasswordHash_() {
+  var props = PropertiesService.getScriptProperties();
+  var hash = props.getProperty('ADMIN_PASSWORD_HASH');
+  if (!hash) {
+    hash = hashAdminPassword_(DEFAULT_ADMIN_PASSWORD);
+    props.setProperty('ADMIN_PASSWORD_HASH', hash);
+  }
+  return hash;
+}
+
+function verifyAdminPassword(inputPassword) {
+  return hashAdminPassword_(inputPassword) === getAdminPasswordHash_();
+}
+
+// ⭐ "관리" 탭에서 호출 — 기존 비밀번호가 맞을 때만 교체한다(요청대로 반드시 재확인).
+function changeAdminPassword(currentPassword, newPassword) {
+  if (!verifyAdminPassword(currentPassword)) {
+    return { ok: false, message: '기존 비밀번호가 일치하지 않습니다.' };
+  }
+  var clean = String(newPassword || '');
+  if (clean.length < 4) {
+    return { ok: false, message: '새 비밀번호는 4자 이상이어야 합니다.' };
+  }
+  return withLock(function () {
+    PropertiesService.getScriptProperties().setProperty('ADMIN_PASSWORD_HASH', hashAdminPassword_(clean));
+    return { ok: true };
+  });
+}
+
 // ⭐ 월초/월말처럼 200명 이상을 한 번에 발송하는 경우, 한 번의 실행에서 전부 보내려 하면
 //   ①실행시간 제한(무료 6분/Workspace 30분), ②메일 하루 발송 한도(일반 계정 100통 등)에 걸릴 수 있다.
 //   그래서 시트 기록은 한 번에 몰아서 처리(appendRow 반복 대신 setValues 1회)하고,
@@ -307,6 +348,15 @@ function loadSignedData(id) {
   return findContractIdInList(ss.getSheetByName('계약목록'), id);
 }
 
+// ⭐ 승인(mode=review) 화면 전용 — 비밀번호를 같이 받아 서버에서 먼저 확인하고, 맞을 때만
+//   계약 데이터를 내려준다. loadSignedData처럼 먼저 데이터를 돌려주고 화면에서만 잠그면,
+//   비밀번호를 입력하기 전에도 네트워크 응답에 주민등록번호 등 원문이 이미 다 와 있게 된다
+//   — 그래서 이 함수는 비밀번호 확인과 조회를 한 번의 호출로 묶는다.
+function loadSignedDataForAdmin(id, password) {
+  if (!verifyAdminPassword(password)) return 'WRONG_PASSWORD';
+  return loadSignedData(id);
+}
+
 // 3-5. saveContractData(data)
 function saveContractData(data) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -318,7 +368,10 @@ function saveContractData(data) {
   var uniqueId = data.contractId;
   data.status = 'SIGNED_BY_WORKER';
   data.workerSignedAt = new Date().toLocaleString();
-  var viewLink = ScriptApp.getService().getUrl() + "?id=" + uniqueId + "&mode=view";
+  // ⭐ mode=review(관리자 승인 전용) — mode=view는 완료된 계약서를 보는 용도(근로자 다운로드
+  //   링크, "계약목록"의 문서링크)라 그쪽은 비밀번호를 요구하면 근로자가 막힌다. 아직 승인 전인
+  //   이 링크만 mode=review로 발급해서 비밀번호 확인 없이는 데이터 자체가 안 내려가게 한다.
+  var viewLink = ScriptApp.getService().getUrl() + "?id=" + uniqueId + "&mode=review";
 
   withLock(function () {
     // ⭐ 승인대기 시트 저장 데이터 설정
