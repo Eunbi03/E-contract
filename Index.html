@@ -953,6 +953,12 @@
   // ⭐ 법인 목록/직인 이미지는 이제 서버(회사설정 시트, 직인 Drive 폴더)에서 불러온다 — 회사 추가/수정 시 코드 배포 없이 시트만 고치면 됨
   const [companies, setCompanies] = useState(DEFAULT_COMPANIES);
   const [sealImages, setSealImages] = useState({});
+  // ⭐ getSealImage() 서버 응답이 도착했는지(성공/실패 무관) 표시 — 어떤 회사명을 마지막으로
+  //   확인했는지 저장한다. "완료" 화면의 PDF 저장 버튼을 이게 true가 되기 전까지 숨겨서,
+  //   근로자가 자기 링크를 열자마자 바로 PDF 저장을 눌러도 직인이 아직 도착하기 전에
+  //   window.print()가 찍혀 직인 없는 PDF가 나오는 경쟁 상태를 막는다(관리자는 승인
+  //   직후 이 값이 이미 채워져 있어 영향 없음).
+  const [sealCheckedFor, setSealCheckedFor] = useState(null);
   // ⭐ "조항템플릿" 시트에서 불러온 고정 조항(제1·9·10·11조) 재정의 — { '1': {title, body}, ... }.
   //   비어있으면(=로드 전이거나 시트 미설정) ContractArticles가 기존 하드코딩 문구를 그대로 보여준다.
   const [clauses, setClauses] = useState({});
@@ -1203,9 +1209,19 @@
       google.script.run.withSuccessHandler(result => {
         if (result && result.dataUrl) setSealImages(prev => ({ ...prev, [formData.companyName]: result.dataUrl }));
         else if (result) console.warn('직인 이미지 없음:', result.message);
-      }).withFailureHandler(err => console.error('직인 이미지 로드 실패:', err)).getSealImage(formData.companyName);
+        setSealCheckedFor(formData.companyName);
+      }).withFailureHandler(err => {
+        console.error('직인 이미지 로드 실패:', err);
+        setSealCheckedFor(formData.companyName);
+      }).getSealImage(formData.companyName);
     }
   }, [contractStatus, formData.companyName]);
+
+  // ⭐ "완료" 화면에서 PDF 저장 버튼을 누르기 전에 직인 조회가 끝났는지 — 이미 직인이 있거나
+  //   (관리자가 막 승인한 직후처럼 동기적으로 채워진 경우), 위 조회가 끝나서(성공/실패 무관)
+  //   sealCheckedFor에 이 회사명이 찍혔으면 true다. false인 동안 PDF 저장 버튼을 숨겨서,
+  //   아직 안 끝난 사이에 window.print()가 직인 없이 찍히는 일을 막는다.
+  const sealReady = !!sealImages[formData.companyName] || sealCheckedFor === formData.companyName;
 
   // 4-4. 주요 헬퍼 함수 (Index.html)
   // ⭐ 입력값 변경 처리 - 관리자 우측 화면
@@ -2093,12 +2109,18 @@
                       <CheckCircle className="w-16 h-16 text-green-500 mb-4"/>
                       <h2 className="text-2xl font-bold text-gray-800 mb-2">계약 완료</h2>
                       <p className="text-gray-500 mb-6 break-keep">최종 승인 및 직인 날인이 완료되었습니다.</p>
-                      <button onClick={()=>{const isWebView = /KAKAOTALK|NAVER|Daum|Instagram|Line/i.test(navigator.userAgent);
-                        if (isWebView) { alert("현재 사용 중인 메일 앱 내부에서는 PDF 저장이 차단되어 있습니다.\n다른 브라우저(Safari, Chrome)를 이용해 주세요."); }
-                        window.print();}}
-                        className="w-full px-6 py-4 bg-gray-800 text-white rounded-lg font-bold hover:bg-gray-900 shadow-lg text-lg">
-                          <Printer className="inline mr-2"/> PDF 저장
-                      </button>
+                      {sealReady ? (
+                        <button onClick={()=>{const isWebView = /KAKAOTALK|NAVER|Daum|Instagram|Line/i.test(navigator.userAgent);
+                          if (isWebView) { alert("현재 사용 중인 메일 앱 내부에서는 PDF 저장이 차단되어 있습니다.\n다른 브라우저(Safari, Chrome)를 이용해 주세요."); }
+                          window.print();}}
+                          className="w-full px-6 py-4 bg-gray-800 text-white rounded-lg font-bold hover:bg-gray-900 shadow-lg text-lg">
+                            <Printer className="inline mr-2"/> PDF 저장
+                        </button>
+                      ) : (
+                        // ⭐ 직인 조회가 아직 끝나지 않은 상태 — 이 버튼이 보이기 전에 눌러서
+                        //   window.print()가 직인 없이 찍히는 것을 막기 위해 여기서 기다린다.
+                        <p className="text-sm text-gray-400">직인 확인 중...</p>
+                      )}
                     </div>
                 ) : (
                     <div className="flex flex-col items-center w-full max-w-sm">
