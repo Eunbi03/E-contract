@@ -442,14 +442,26 @@
     const [pw, setPw] = useState('');
     const [err, setErr] = useState('');
     const [checking, setChecking] = useState(false);
+    const pwInputRef = useRef(null);
 
+    // ⭐ Apps Script의 google.script.run은 서버에서 하는 일이 거의 없어도(단순 비밀번호
+    //   비교라도) 요청당 1~3초 정도 걸리는 게 플랫폼 자체의 특성이다(발송/승인 등 다른
+    //   버튼도 동일). 틀렸을 때 유독 더 느리게 "느껴지는" 건 실제로 더 오래 걸려서가
+    //   아니라, 1차 시도(실패) + 재입력 + 2차 시도(성공)로 왕복이 두 번 겹치기 때문이다.
+    //   그래서 틀렸을 때 입력창을 자동으로 비우고 포커스까지 다시 줘서, 재입력에 걸리는
+    //   시간이라도 최대한 줄인다.
     const submit = () => {
       if (!pw || checking) return;
       setErr(''); setChecking(true);
       if (reviewMode) {
         google.script.run.withSuccessHandler(data => {
           setChecking(false);
-          if (data === 'WRONG_PASSWORD') return setErr('비밀번호가 올바르지 않습니다.');
+          if (data === 'WRONG_PASSWORD') {
+            setErr('비밀번호가 올바르지 않습니다.');
+            setPw('');
+            if (pwInputRef.current) pwInputRef.current.focus();
+            return;
+          }
           if (!data) return setErr('유효하지 않거나 이미 처리된 문서입니다.');
           onDataLoaded(data);
           onAuthed();
@@ -457,7 +469,12 @@
       } else {
         google.script.run.withSuccessHandler(ok => {
           setChecking(false);
-          if (!ok) return setErr('비밀번호가 올바르지 않습니다.');
+          if (!ok) {
+            setErr('비밀번호가 올바르지 않습니다.');
+            setPw('');
+            if (pwInputRef.current) pwInputRef.current.focus();
+            return;
+          }
           onAuthed();
         }).withFailureHandler(e => { setChecking(false); setErr('오류가 발생했습니다: ' + e); }).verifyAdminPassword(pw);
       }
@@ -470,15 +487,17 @@
           <h2 className="text-xl font-bold text-gray-800 mb-2 text-center">관리자 비밀번호</h2>
           <p className="text-sm text-gray-500 mb-6 text-center">계속하려면 비밀번호를 입력하세요.</p>
           <input
-            type="password" autoFocus value={pw} placeholder="비밀번호"
+            ref={pwInputRef}
+            type="password" autoFocus value={pw} placeholder="비밀번호" disabled={checking}
             onChange={e => { setPw(e.target.value); setErr(''); }}
             onKeyDown={e => { if (e.key === 'Enter') submit(); }}
-            className="w-full p-3 border rounded mb-2"
+            className="w-full p-3 border rounded mb-2 disabled:bg-gray-100"
           />
           {err && <p className="text-sm text-red-500 mb-2 font-bold">{err}</p>}
           <button onClick={submit} disabled={checking} className="w-full py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 disabled:opacity-50">
             {checking ? '확인 중...' : '확인'}
           </button>
+          {checking && <p className="text-xs text-gray-400 mt-3 text-center">서버 확인에는 보통 1~3초 정도 걸립니다.</p>}
         </div>
       </div>
     );
@@ -968,6 +987,9 @@
   const [urlId, setUrlId] = useState(null);
   const canvasRef = useRef(null);
   const justApprovedRef = useRef(false);
+  // ⭐ 관리자가 "계약 법인" 드롭다운을 직접 바꾼 적이 있으면 true — 법인/기본값 설정이
+  //   서버에서 늦게 도착해도(getConfig) 이미 고른 선택을 덮어쓰지 않게 막는 용도.
+  const companyTouchedRef = useRef(false);
   const [isDrawing, setIsDrawing] = useState(false);
   const [isInvalidLink, setIsInvalidLink] = useState(false);
   // ⭐ 관리자 전용 화면(작성/수정/설정 탭, 승인 화면) 접근을 비밀번호로 막는다.
@@ -1106,7 +1128,11 @@
     google.script.run.withSuccessHandler(cfg => {
       if (cfg && cfg.companies && cfg.companies.length) {
         setCompanies(cfg.companies);
-        if (!hasId) {
+        // ⭐ 이 응답이 도착하기 전에 관리자가 이미 드롭다운에서 법인을 직접 골랐다면
+        //   (companyTouchedRef) 여기서 첫 번째 법인으로 되돌리지 않는다 — 안 그러면
+        //   페이지를 열자마자 재빨리 법인을 바꿔도, 뒤늦게 도착한 이 응답이 선택을
+        //   조용히 덮어써서 엉뚱한(기본) 법인으로 발송되는 사고가 날 수 있다.
+        if (!hasId && !companyTouchedRef.current) {
           const first = cfg.companies[0];
           setFormData(prev => ({
             ...prev,
@@ -1144,6 +1170,7 @@
     const newVal = type === 'checkbox' ? checked : value;
 
     if (name === 'companySelect') {
+      companyTouchedRef.current = true;
       const selected = companies.find(c => c.name === value);
       setFormData({ ...formData, companyName: selected.name, companyAddress: selected.address, companyPhone: selected.phone, repName: selected.rep, managerPhone: selected.managerPhone, managerEmail: selected.managerEmail, managerName: selected.managerName });
     } else if (name === 'joinDate') {
