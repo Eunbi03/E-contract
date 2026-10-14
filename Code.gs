@@ -158,39 +158,53 @@ function sendBatchContracts(commonData, workerList) {
 //   더 남아있으면 SEND_CHUNK_INTERVAL_MS 뒤에 자기 자신을 다시 호출하는 1회성 트리거를 예약한다.
 //   (Apps Script의 after() 1회성 트리거는 실행되고 나면 자동으로 삭제된다.)
 function processSendQueue() {
-  return withLock(function () {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var sheet = ss.getSheetByName('발송큐');
-    if (!sheet) return { sentCount: 0, failCount: 0 };
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('발송큐');
+  if (!sheet) return { sentCount: 0, failCount: 0 };
 
+  var statusCol = 10; // '상태' 열 (0-based)
+  var failReasonCol = -1;
+  var quotaExhausted = false;
+  var claimedRows = []; // 이번 회차에 보낼 행들의 { rowIdx, row } 스냅샷
+
+  // ⭐ 메일/문자 발송(네트워크 I/O)은 몇 초~몇십 초 걸릴 수 있는데, 이 전체를 withLock 안에
+  //   두면 그 동안 saveContractData/approveContract/설정 변경 같은 다른 모든 withLock 작업이
+  //   lock.waitLock(30000)에서 30초를 기다리다 예외로 실패한다 — 대량 발송 중에는 서명 제출/
+  //   승인/설정 변경이 전부 막히는 셈. 그래서 락은 "보낼 행을 고르고 SENDING으로 선점 표시"하는
+  //   이 짧은 구간에만 걸고, 실제 발송은 락 밖에서 한다. 선점 표시는 연속 발송 클릭이나 트리거
+  //   겹침으로 processSendQueue가 동시에 두 번 실행돼도 같은 행을 두 번 보내지 않게 막아준다.
+  withLock(function () {
     ensureQueueFailReasonColumn(sheet);
     var data = sheet.getDataRange().getValues();
-    var statusCol = 10; // '상태' 열 (0-based)
-    var failReasonCol = data[0].indexOf('실패사유'); // 0-based, 헤더에서 위치 조회
+    failReasonCol = data[0].indexOf('실패사유'); // 0-based, 헤더에서 위치 조회
 
     // ⭐ 대기열을 앞에서부터 훑을 때, 이메일 한도가 소진돼 이번 회차에 못 보낼 이메일 건은
     //   건너뛰고 계속 다음 후보를 찾는다 — 그래야 뒤쪽에 있는 SMS 건(이메일 한도와 무관)이
     //   앞쪽에 막힌 이메일 건들 때문에 청크 30자리를 다 뺏기고 하루 종일 밀리지 않는다.
-    var quotaExhausted = false;
     var simQuota = MailApp.getRemainingDailyQuota();
-    var pendingRowIndexes = [];
-    for (var i = 1; i < data.length && pendingRowIndexes.length < SEND_CHUNK_SIZE; i++) {
+    for (var i = 1; i < data.length && claimedRows.length < SEND_CHUNK_SIZE; i++) {
       if (data[i][statusCol] !== 'PENDING') continue;
       if (data[i][5] === 'email') {
         if (simQuota <= 0) { quotaExhausted = true; continue; }
         simQuota--;
       }
-      pendingRowIndexes.push(i);
+      claimedRows.push({ rowIdx: i, row: data[i] });
     }
+    claimedRows.forEach(function (c) {
+      sheet.getRange(c.rowIdx + 1, statusCol + 1).setValue('SENDING');
+    });
+  });
 
-    var sentCount = 0, failCount = 0;
-    // ⭐ 서명 요청 메세지 문구 — 이제 "메시지템플릿" 시트(설정 탭에서 관리자가 직접 고침)에서
-    //   가져온다. 청크 전체가 같은 문구를 쓰므로 행마다 다시 읽지 않고 한 번만 불러온다.
-    var messageTemplate = pendingRowIndexes.length ? getMessageTemplate() : null;
+  var sentCount = 0, failCount = 0;
 
-    for (var k = 0; k < pendingRowIndexes.length; k++) {
-      var rowIdx = pendingRowIndexes[k];
-      var row = data[rowIdx];
+  if (claimedRows.length) {
+    // ⭐ 서명 요청 메세지 문구 — "메시지템플릿" 시트(설정 탭에서 관리자가 직접 고침)에서 가져온다.
+    //   청크 전체가 같은 문구를 쓰므로 행마다 다시 읽지 않고 한 번만 불러온다.
+    var messageTemplate = getMessageTemplate();
+
+    for (var k = 0; k < claimedRows.length; k++) {
+      var rowIdx = claimedRows[k].rowIdx;
+      var row = claimedRows[k].row;
       var name = row[1], email = row[2], phone = row[3], link = row[4], rowMode = row[5],
           companyName = row[6], managerName = row[7], managerPhone = row[8], managerEmail = row[9];
 
@@ -221,24 +235,26 @@ function processSendQueue() {
         failReason = (e && e.message) ? e.message : String(e);
         failCount++;
       }
-      data[rowIdx][statusCol] = newStatus;
       sheet.getRange(rowIdx + 1, statusCol + 1).setValue(newStatus);
       // ⭐ 실패 사유를 시트에 직접 남겨서, 실행 기록(로그)까지 안 가도 '발송큐' 시트만 보고 원인을 알 수 있게 한다.
       if (failReasonCol >= 0) {
         sheet.getRange(rowIdx + 1, failReasonCol + 1).setValue(failReason);
       }
     }
+  }
 
-    var stillPending = false;
+  var stillPending = withLock(function () {
+    var data = sheet.getDataRange().getValues();
     for (var j = 1; j < data.length; j++) {
-      if (data[j][statusCol] === 'PENDING') { stillPending = true; break; }
+      if (data[j][statusCol] === 'PENDING') return true;
     }
-    if (stillPending) {
-      ensureQueueTriggerScheduled(quotaExhausted ? SEND_QUOTA_RETRY_MS : SEND_CHUNK_INTERVAL_MS);
-    }
-
-    return { sentCount: sentCount, failCount: failCount };
+    return false;
   });
+  if (stillPending) {
+    ensureQueueTriggerScheduled(quotaExhausted ? SEND_QUOTA_RETRY_MS : SEND_CHUNK_INTERVAL_MS);
+  }
+
+  return { sentCount: sentCount, failCount: failCount };
 }
 
 // ⭐ 예전에 만들어진 '발송큐' 시트에는 '실패사유' 열이 없을 수 있어, 없으면 헤더 끝에 추가해준다.
@@ -373,15 +389,22 @@ function saveContractData(data) {
   //   이 링크만 mode=review로 발급해서 비밀번호 확인 없이는 데이터 자체가 안 내려가게 한다.
   var viewLink = ScriptApp.getService().getUrl() + "?id=" + uniqueId + "&mode=review";
 
-  withLock(function () {
+  return withLock(function () {
+    // ⭐ 중복 제출 방지 — 네트워크 재시도나 "최종 제출" 두 번 클릭으로 같은 id가 또 들어오면,
+    //   이미 승인대기로 넘어갔거나 이미 완료 처리된 건은 또 쌓지 않고 조용히 성공으로 처리한다.
+    //   (findRowById/deleteRowById는 항상 첫 번째 일치 행만 다루므로, 가드 없이 두 번 appendRow하면
+    //   두 번째 행은 영원히 승인되지 않는 고아 데이터로 남는다.)
+    if (findRowById(targetSheet, uniqueId, 0) || findContractIdInList(ss.getSheetByName('계약목록'), uniqueId)) {
+      return "Success";
+    }
     // ⭐ 승인대기 시트 저장 데이터 설정
     targetSheet.appendRow([
       uniqueId, data.companyName || '', data.empName || '', data.empPhone || '', data.workerContactEmail || '',
       new Date(), 'SIGNED_BY_WORKER', viewLink, JSON.stringify(data)
     ]);
     deleteRowById(ss.getSheetByName('계약대기'), uniqueId, 0);
+    return "Success";
   });
-  return "Success";
 }
 
 // 3-6. approveContract(data)
@@ -399,14 +422,22 @@ function approveContract(data) {
 
   var viewLink = ScriptApp.getService().getUrl() + "?id=" + data.contractId + "&mode=view";
 
-  withLock(function () {
+  // ⭐ 중복 승인 방지 — 이미 계약목록에 들어가 있으면(=이미 승인 처리됨) 또 행을 쌓거나
+  //   완료 안내를 중복 발송하지 않는다. 승인대기에서 이미 사라졌다면(=방금 다른 요청이 먼저
+  //   승인 완료) 마찬가지로 중복 호출로 보고 건너뛴다.
+  var alreadyApproved = withLock(function () {
+    if (findContractIdInList(listSheet, data.contractId)) return true;
+    if (!findRowById(ss.getSheetByName('승인대기'), data.contractId, 0)) return true;
+
     // ⭐ 계약목록 시트 저장 데이터 설정
     listSheet.appendRow([
       data.companyName, data.empName, data.empPhone, data.empAddress, data.joinDate,
       data.sentAt || "", data.workerSignedAt || "", data.approvedAt, viewLink, JSON.stringify(data)
     ]);
     deleteRowById(ss.getSheetByName('승인대기'), data.contractId, 0);
+    return false;
   });
+  if (alreadyApproved) return "Approved";
 
   var todayObj = new Date();
   var expireDate = new Date(todayObj);
