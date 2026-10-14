@@ -25,6 +25,44 @@ function withLock(fn) {
   }
 }
 
+// ⭐ "시트 없으면 새로 만들기" 분기가 withLock 바깥에 있으면, 막 복제된 스프레드시트에
+//   두 요청이 거의 동시에 들어와(둘 다 시트가 없다고 봄) 둘 다 insertSheet를 시도해 한쪽이
+//   "같은 이름의 시트가 이미 있음" 예외로 실패할 수 있다. 락 밖에서 먼저 싼 값에(이미 있는
+//   경우) 확인하고, 없을 때만 락을 잡은 뒤 그 안에서 한 번 더 확인한다(락을 기다리는 동안
+//   다른 실행이 이미 만들었을 수 있으므로) — 그래도 없을 때만 실제로 생성+초기화한다.
+//   seedFn(sheet)는 "이 실행이 실제로 새로 만든 경우에만" 호출되어 헤더/초기 데이터를 채운다.
+function getOrCreateSheet_(ss, name, seedFn) {
+  var sheet = ss.getSheetByName(name);
+  if (sheet) return sheet;
+  return withLock(function () {
+    sheet = ss.getSheetByName(name);
+    if (sheet) return sheet;
+    sheet = ss.insertSheet(name);
+    if (seedFn) seedFn(sheet);
+    return sheet;
+  });
+}
+
+// ⭐ 헤더 1행(문자열 배열)을 "열 이름 → 0-based 인덱스" 맵으로 바꾼다. '발송큐' 같은 시트의
+//   열을 위치(row[10] 등) 대신 이 맵(row[col['상태']])으로 찾으면, 나중에 열 순서를 바꾸거나
+//   열을 추가해도(이름만 그대로면) 코드를 고칠 필요 없이 올바른 칸을 계속 찾는다.
+function headerColumnMap_(header) {
+  var map = {};
+  header.forEach(function (name, idx) { map[name] = idx; });
+  return map;
+}
+
+// ⭐ rowObj(열 이름 → 값)를 "현재" header 순서에 맞는 배열로 바꿔준다. appendRow/setValues는
+//   결국 배열이 필요하지만, 이 함수를 쓰면 작성하는 쪽 코드는 실제 열 순서를 몰라도 되고,
+//   시트에서 열 순서를 바꿔도 같은 이름 칸에 그대로 값이 들어간다. header에 없는 키는
+//   무시되고, rowObj에 값이 없는 헤더 칸은 빈 문자열로 채운다.
+function rowFromHeader_(header, rowObj) {
+  return header.map(function (colName) {
+    var v = rowObj[colName];
+    return (v === undefined || v === null) ? '' : v;
+  });
+}
+
 // ⭐ 관리자 비밀번호 — 작성/수정/설정 탭과 승인(직인 날인) 화면 진입을 막는다.
 //   평문이 아니라 해시로만 스크립트 속성에 저장한다(스프레드시트 공동편집자 등이 스크립트
 //   속성을 열어봐도 원문이 바로 보이지 않도록). 최초 호출 시 비밀번호가 설정돼 있지 않으면
@@ -78,15 +116,17 @@ var SEND_QUOTA_RETRY_MS = 60 * 60 * 1000;     // 일일 메일 한도 초과 시
 // 3-2. sendBatchContracts(commonData, workerList)
 function sendBatchContracts(commonData, workerList) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var draftSheet = ss.getSheetByName('계약대기') || ss.insertSheet('계약대기');
-  if (draftSheet.getLastRow() === 0) draftSheet.appendRow(['ID', '법인', '성명', '전화번호', '이메일', '발송시간', '데이터']);
+  var draftSheet = getOrCreateSheet_(ss, '계약대기', function (s) {
+    s.appendRow(['ID', '법인', '성명', '전화번호', '이메일', '발송시간', '데이터']);
+  });
 
-  var queueSheet = ss.getSheetByName('발송큐') || ss.insertSheet('발송큐');
-  if (queueSheet.getLastRow() === 0) {
-    queueSheet.appendRow(['ID', '성명', '이메일', '전화번호', '링크', '모드', '법인명', '담당자명', '담당자연락처', '담당자이메일', '상태', '생성시간', '실패사유']);
-  } else {
-    ensureQueueFailReasonColumn(queueSheet);
-  }
+  var queueSheet = getOrCreateSheet_(ss, '발송큐', function (s) {
+    s.appendRow(['ID', '성명', '이메일', '전화번호', '링크', '모드', '법인명', '담당자명', '담당자연락처', '담당자이메일', '상태', '생성시간', '실패사유']);
+  });
+  ensureQueueFailReasonColumn(queueSheet);
+  // ⭐ '발송큐' 행은 이름(헤더)으로 쓴다 — 나중에 열 순서를 바꾸거나 열을 더 추가해도
+  //   이름만 같으면 rowFromHeader_가 올바른 칸에 그대로 써준다.
+  var queueHeader = queueSheet.getRange(1, 1, 1, queueSheet.getLastColumn()).getValues()[0];
 
   var urlBase = ScriptApp.getService().getUrl();
   var nowStr = new Date().toLocaleString();
@@ -116,11 +156,12 @@ function sendBatchContracts(commonData, workerList) {
     draftRows.push([uniqueId, commonData.companyName || '', worker.name || '', worker.password || '', worker.email || '', nowStr, JSON.stringify(individualData)]);
 
     var link = urlBase + "?id=" + uniqueId;
-    queueRows.push([
-      uniqueId, worker.name, worker.email || '', worker.password || '', link, workerMode,
-      commonData.companyName, commonData.managerName || '', commonData.managerPhone || '', commonData.managerEmail || '',
-      'PENDING', nowStr
-    ]);
+    queueRows.push(rowFromHeader_(queueHeader, {
+      'ID': uniqueId, '성명': worker.name, '이메일': worker.email || '', '전화번호': worker.password || '',
+      '링크': link, '모드': workerMode, '법인명': commonData.companyName,
+      '담당자명': commonData.managerName || '', '담당자연락처': commonData.managerPhone || '', '담당자이메일': commonData.managerEmail || '',
+      '상태': 'PENDING', '생성시간': nowStr
+    }));
   }
 
   withLock(function () {
@@ -142,10 +183,11 @@ function sendBatchContracts(commonData, workerList) {
   var justAddedIds = {};
   draftRows.forEach(function (r) { justAddedIds[r[0]] = true; });
   var freshQueue = queueSheet.getDataRange().getValues();
+  var freshCol = headerColumnMap_(freshQueue[0]);
   var sentNow = 0, failNow = 0, queuedRemaining = 0;
   for (var qi = 1; qi < freshQueue.length; qi++) {
-    if (!justAddedIds[freshQueue[qi][0]]) continue;
-    var st = freshQueue[qi][10];
+    if (!justAddedIds[freshQueue[qi][freshCol['ID']]]) continue;
+    var st = freshQueue[qi][freshCol['상태']];
     if (st === 'SENT') sentNow++;
     else if (st === 'FAILED') failNow++;
     else queuedRemaining++;
@@ -162,10 +204,10 @@ function processSendQueue() {
   var sheet = ss.getSheetByName('발송큐');
   if (!sheet) return { sentCount: 0, failCount: 0 };
 
-  var statusCol = 10; // '상태' 열 (0-based)
+  var statusCol = -1;
   var failReasonCol = -1;
   var quotaExhausted = false;
-  var claimedRows = []; // 이번 회차에 보낼 행들의 { rowIdx, row } 스냅샷
+  var claimedRows = []; // 이번 회차에 보낼 행들의 { rowIdx, row, col } 스냅샷
 
   // ⭐ 메일/문자 발송(네트워크 I/O)은 몇 초~몇십 초 걸릴 수 있는데, 이 전체를 withLock 안에
   //   두면 그 동안 saveContractData/approveContract/설정 변경 같은 다른 모든 withLock 작업이
@@ -176,7 +218,11 @@ function processSendQueue() {
   withLock(function () {
     ensureQueueFailReasonColumn(sheet);
     var data = sheet.getDataRange().getValues();
-    failReasonCol = data[0].indexOf('실패사유'); // 0-based, 헤더에서 위치 조회
+    // ⭐ 모든 열을 위치(row[5], row[10] 등) 대신 헤더 이름으로 찾는다 — '발송큐' 시트에서
+    //   열 순서를 바꾸거나 열을 더 추가해도 코드를 고칠 필요 없이 올바른 칸을 계속 찾는다.
+    var col = headerColumnMap_(data[0]);
+    statusCol = col['상태'];
+    failReasonCol = col['실패사유'];
 
     // ⭐ 대기열을 앞에서부터 훑을 때, 이메일 한도가 소진돼 이번 회차에 못 보낼 이메일 건은
     //   건너뛰고 계속 다음 후보를 찾는다 — 그래야 뒤쪽에 있는 SMS 건(이메일 한도와 무관)이
@@ -184,11 +230,11 @@ function processSendQueue() {
     var simQuota = MailApp.getRemainingDailyQuota();
     for (var i = 1; i < data.length && claimedRows.length < SEND_CHUNK_SIZE; i++) {
       if (data[i][statusCol] !== 'PENDING') continue;
-      if (data[i][5] === 'email') {
+      if (data[i][col['모드']] === 'email') {
         if (simQuota <= 0) { quotaExhausted = true; continue; }
         simQuota--;
       }
-      claimedRows.push({ rowIdx: i, row: data[i] });
+      claimedRows.push({ rowIdx: i, row: data[i], col: col });
     }
     claimedRows.forEach(function (c) {
       sheet.getRange(c.rowIdx + 1, statusCol + 1).setValue('SENDING');
@@ -205,8 +251,9 @@ function processSendQueue() {
     for (var k = 0; k < claimedRows.length; k++) {
       var rowIdx = claimedRows[k].rowIdx;
       var row = claimedRows[k].row;
-      var name = row[1], email = row[2], phone = row[3], link = row[4], rowMode = row[5],
-          companyName = row[6], managerName = row[7], managerPhone = row[8], managerEmail = row[9];
+      var rcol = claimedRows[k].col;
+      var name = row[rcol['성명']], email = row[rcol['이메일']], phone = row[rcol['전화번호']], link = row[rcol['링크']], rowMode = row[rcol['모드']],
+          companyName = row[rcol['법인명']], managerName = row[rcol['담당자명']], managerPhone = row[rcol['담당자연락처']], managerEmail = row[rcol['담당자이메일']];
 
       var msgVars = {
         workerName: name, companyName: companyName, link: link,
@@ -245,8 +292,9 @@ function processSendQueue() {
 
   var stillPending = withLock(function () {
     var data = sheet.getDataRange().getValues();
+    var pendingStatusCol = headerColumnMap_(data[0])['상태'];
     for (var j = 1; j < data.length; j++) {
-      if (data[j][statusCol] === 'PENDING') return true;
+      if (data[j][pendingStatusCol] === 'PENDING') return true;
     }
     return false;
   });
@@ -376,10 +424,10 @@ function loadSignedDataForAdmin(id, password) {
 // 3-5. saveContractData(data)
 function saveContractData(data) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var targetSheet = ss.getSheetByName('승인대기') || ss.insertSheet('승인대기');
-
   // ⭐ 승인대기 시트 목록
-  if (targetSheet.getLastRow() === 0) targetSheet.appendRow(['ID', '법인', '성명', '전화번호', '이메일', '수신시간', '현황', '승인링크', '완료데이터(JSON)']);
+  var targetSheet = getOrCreateSheet_(ss, '승인대기', function (s) {
+    s.appendRow(['ID', '법인', '성명', '전화번호', '이메일', '수신시간', '현황', '승인링크', '완료데이터(JSON)']);
+  });
 
   var uniqueId = data.contractId;
   data.status = 'SIGNED_BY_WORKER';
@@ -412,13 +460,11 @@ function approveContract(data) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   data.status = 'COMPLETED';
   data.approvedAt = new Date().toLocaleString();
-  var listSheet = ss.getSheetByName('계약목록') || ss.insertSheet('계약목록');
-
   // ⭐ 계약목록 시트 목록 — 주민등록번호는 별도 열로 두지 않는다(민감정보라 한눈에 보이는
   //   목록에는 안 올리는 편이 안전). 필요하면 마지막 "데이터(JSON)" 열 안에 그대로 들어있다.
-  if (listSheet.getLastRow() === 0) {
-    listSheet.appendRow(['법인', '성명', '전화번호', '주소', '입사일', '발송일시', '제출일시', '완료일시', '문서링크', '데이터(JSON)']);
-  }
+  var listSheet = getOrCreateSheet_(ss, '계약목록', function (s) {
+    s.appendRow(['법인', '성명', '전화번호', '주소', '입사일', '발송일시', '제출일시', '완료일시', '문서링크', '데이터(JSON)']);
+  });
 
   var viewLink = ScriptApp.getService().getUrl() + "?id=" + data.contractId + "&mode=view";
 
@@ -535,7 +581,9 @@ function getConfig() {
 //   담당자가 "조항템플릿" 시트의 본문 셀만 고치면 코드 배포 없이 바로 반영된다.
 function getClauseTemplates() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('조항템플릿');
+  var sheet = getOrCreateSheet_(ss, '조항템플릿', function (s) {
+    s.appendRow(['조번호', '제목', '본문']);
+  });
 
   // ⭐ 변수(근무장소/담당업무)가 섞인 조항은 {{workPlace}}, {{duties}} 같은 자리표시자로
   //   저장해두고, 실제 계약서를 그릴 때 formData 값으로 치환한다.
@@ -557,11 +605,6 @@ function getClauseTemplates() {
     'consent3': ['동의 및 교부확인', '1) 임금 산정방식 및 지급방법의 결정에 동의합니다.<br/>2) 퇴사 시 잔여 임금 및 퇴직금 등은 최초 도래하는 당사 임금지급일에 지급하는 것에 동의합니다.<br/>(1) 임금 지급일 : 매월 초일부터 말일까지의 임금을 익월 15일 지급<br/>(2) 퇴직연금 부담금 납입일 : 매월 초일부터 말일까지의 임금에 대한 부담금을 익월 25일 납입']
   };
   var order = ['1', '3', '4', '5', '7', '8', '9', '10', '11', 'consent1', 'consent2', 'consent3'];
-
-  if (!sheet) {
-    sheet = ss.insertSheet('조항템플릿');
-    sheet.appendRow(['조번호', '제목', '본문']);
-  }
 
   var data = sheet.getDataRange().getValues();
   var existingNums = {};
@@ -607,21 +650,18 @@ function saveClauseTemplate(num, title, body) {
 
 function getCompanySettings() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('회사설정');
-
   // ⭐ 시트가 없으면 기존에 코드에 하드코딩돼 있던 값 그대로 최초 1회 생성해준다.
-  if (!sheet) {
-    sheet = ss.insertSheet('회사설정');
-    sheet.appendRow(['법인명', '주소', '전화번호', '대표자', '담당자명', '담당자연락처', '담당자이메일']);
-    var defaults = [
+  var sheet = getOrCreateSheet_(ss, '회사설정', function (s) {
+    s.appendRow(['법인명', '주소', '전화번호', '대표자', '담당자명', '담당자연락처', '담당자이메일']);
+    var seedCompanies = [
       ['(주)케이프라이드', '강원도 횡성군 우천면 우천제2농공단지로 65-50', 'T. 033-644-4467 F.033-644-1944', '김도영', '송문주', '033-340-0023', 'kpride@example.com'],
       ['㈜케이펙', '강원도 강릉시 정원로 54, 8층(교동, 주니어타운)', 'T. 033-644-4467 F.033-644-1944', '김도영', '하주연', '033-340-0012', 'kpride@example.com'],
       ['백두대간영농조합법인', '강원도 강릉시 정원로 54, 8층(교동, 주니어타운)', 'T. 033-644-4467 F.033-644-1944', '김도영', '서영민', '033-340-0021', 'kpride@example.com'],
       ['㈜보담', '강원도 원주시 저금어지길 456(가현동 강원LPC 2층)', 'T. 033-644-4467 F.033-644-1944', '이승수', '이선우', '033-340-0020', 'kpride@example.com'],
       ['(주)마시타', '강원도 강릉시 정원로 54, 8층(교통, 주니어타운)', 'T. 033-644-4467 F.033-644-1944', '김주원', '송문주', '033-340-0023', 'kpride@example.com']
     ];
-    defaults.forEach(function (row) { sheet.appendRow(row); });
-  }
+    seedCompanies.forEach(function (row) { s.appendRow(row); });
+  });
 
   var data = sheet.getDataRange().getValues();
   var list = [];
@@ -691,15 +731,13 @@ function readDefaultValue(raw, fallback) {
 
 function getDefaults() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('기본값설정');
-  if (!sheet) {
-    sheet = ss.insertSheet('기본값설정');
-    sheet.appendRow(DEFAULT_FIELDS);
+  var sheet = getOrCreateSheet_(ss, '기본값설정', function (s) {
+    s.appendRow(DEFAULT_FIELDS);
     var seedRow = DEFAULT_FIELDS.map(function (f) { return HARDCODED_DEFAULTS[f]; });
-    var seedRange = sheet.getRange(2, 1, 1, seedRow.length);
+    var seedRange = s.getRange(2, 1, 1, seedRow.length);
     seedRange.setNumberFormat('@'); // 일반 텍스트로 고정 — 시간 자동변환 방지
     seedRange.setValues([seedRow]);
-  }
+  });
   var data = sheet.getDataRange().getValues();
   if (data.length < 2) return HARDCODED_DEFAULTS;
   var result = {};
@@ -732,12 +770,10 @@ var DEFAULT_MESSAGE_BODY = '안녕하세요. {{workerName}}님.\n{{companyName}}
 
 function getMessageTemplate() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('메시지템플릿');
-  if (!sheet) {
-    sheet = ss.insertSheet('메시지템플릿');
-    sheet.appendRow(['제목', '본문']);
-    sheet.appendRow([DEFAULT_MESSAGE_SUBJECT, DEFAULT_MESSAGE_BODY]);
-  }
+  var sheet = getOrCreateSheet_(ss, '메시지템플릿', function (s) {
+    s.appendRow(['제목', '본문']);
+    s.appendRow([DEFAULT_MESSAGE_SUBJECT, DEFAULT_MESSAGE_BODY]);
+  });
   var data = sheet.getDataRange().getValues();
   if (data.length < 2) return { subject: DEFAULT_MESSAGE_SUBJECT, body: DEFAULT_MESSAGE_BODY };
   return {

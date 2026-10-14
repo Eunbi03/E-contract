@@ -226,6 +226,25 @@
     return clone.textContent;
   };
 
+  // ⭐ "사용자/근로자 정보" 머리글 표 — workerStep===1(근로자 확인화면 1단계)·workerStep===10
+  //   (최종 서명화면)·최종 미리보기/인쇄 화면까지 3곳에 거의 그대로 복붙돼 있었다(코드리뷰
+  //   지적사항). 복붙하다 표기가 갈라져서, "을"쪽만 최종 미리보기에서는 괄호로 감싸고
+  //   ("을") 중간에 공백까지 들어간 "성 명"으로 적혀 있었는데("갑"쪽은 항상 ("갑")로 일관되게
+  //   괄호가 있었다), 이 컴포넌트 하나로 합쳐서 "갑"과 같은 표기("을", 공백 없는 "성명")로
+  //   통일했다. 앞으로 이 표의 항목을 추가/수정할 곳도 한 곳뿐이다.
+  const PartyInfoTable = ({ formData }) => (
+    <table className="c-table mb-8 text-sm">
+      <tbody>
+        <tr><td rowSpan="3" className="bg-gray-label w-24">사용자<br/>("갑")</td><td className="bg-gray-label w-20">명 칭</td><td className="pl-4 font-bold">{formData.companyName}</td></tr>
+        <tr><td className="bg-gray-label">주 소</td><td className="pl-4">{formData.companyAddress}</td></tr>
+        <tr><td className="bg-gray-label">전화번호</td><td className="pl-4">{formData.companyPhone}</td></tr>
+        <tr><td rowSpan="3" className="bg-gray-label">근로자<br/>("을")</td><td className="bg-gray-label">성명</td><td className="pl-4"><span>{formData.empName}</span> <span className="text-gray-600 ml-2">(주민등록번호: {formData.empRegNumber})</span></td></tr>
+        <tr><td className="bg-gray-label">주 소</td><td className="pl-4">{formData.empAddress}</td></tr>
+        <tr><td className="bg-gray-label">연락처</td><td className="pl-4">{formData.empPhone}</td></tr>
+      </tbody>
+    </table>
+  );
+
   // ⭐ 제1조~제11조 본문 — 예전에는 workerStep===10(근로자 최종 확인 화면)과 최종 미리보기/인쇄
   //   화면에 이 조항 전체가 거의 그대로 두 번 복붙돼 있었다(코드리뷰 지적사항). 문구를 손으로
   //   옮겨 적을 때 실제로 두 군데 사이에 미세한 표기 차이가 이미 생겨 있었는데(아래 참고),
@@ -691,7 +710,7 @@
   //   HTML이 아니라 실제 메일/문자 본문에 바로 들어가는 순수 텍스트라서 변환 로직만 다르다
   //   (messageTemplateToEditorHtml/serializeMessageBody, 모듈 스코프에 정의).
   //   SettingsPanel과 같은 이유로 App 바깥(모듈 스코프)에 두고 상태를 props로 받는다.
-  const MessageTemplateEditor = ({ messageTemplate, setMessageTemplate }) => {
+  const MessageTemplateEditor = ({ messageTemplate, setMessageTemplate, touchedRef }) => {
     const [subject, setSubject] = useState(messageTemplate ? messageTemplate.subject : '');
     const [saving, setSaving] = useState(false);
     const bodyRef = useRef(null);
@@ -758,7 +777,7 @@
         </div>
 
         <label className="text-xs font-bold text-gray-600 block mb-1">메일 제목 (이메일에만 사용)</label>
-        <input className="w-full p-2 border rounded text-sm mb-3" value={subject} onChange={e => setSubject(e.target.value)} placeholder="메일 제목" />
+        <input className="w-full p-2 border rounded text-sm mb-3" value={subject} onChange={e => { touchedRef.current = true; setSubject(e.target.value); }} placeholder="메일 제목" />
 
         <label className="text-xs font-bold text-gray-600 block mb-1">본문 (이메일 본문 · 문자 내용 공용)</label>
         <div
@@ -767,8 +786,8 @@
           suppressContentEditableWarning
           dangerouslySetInnerHTML={{ __html: initialBodyHtml }}
           onClick={handleEditableBodyClick}
-          onKeyDown={handleMessageBodyKeyDown}
-          onDrop={e => handleEditableBodyDrop(e, draggedChipRef, MESSAGE_VARIABLE_FIELDS)}
+          onKeyDown={e => { touchedRef.current = true; handleMessageBodyKeyDown(e); }}
+          onDrop={e => { touchedRef.current = true; handleEditableBodyDrop(e, draggedChipRef, MESSAGE_VARIABLE_FIELDS); }}
           onDragOver={e => e.preventDefault()}
           onDragStart={e => handleEditableBodyDragStart(e, draggedChipRef)}
           style={{ whiteSpace: 'pre-wrap' }}
@@ -990,6 +1009,14 @@
   // ⭐ 관리자가 "계약 법인" 드롭다운을 직접 바꾼 적이 있으면 true — 법인/기본값 설정이
   //   서버에서 늦게 도착해도(getConfig) 이미 고른 선택을 덮어쓰지 않게 막는 용도.
   const companyTouchedRef = useRef(false);
+  // ⭐ companyTouchedRef와 같은 패턴 — 작성 탭의 근무장소/담당업무/근로시간 등 "기본값"
+  //   필드를 관리자가 이미 직접 고쳤으면, 늦게 도착한 getConfig()의 cfg.defaults가
+  //   그 입력값을 조용히 덮어쓰지 않게 막는다.
+  const defaultsTouchedRef = useRef(false);
+  // ⭐ 같은 패턴 — 설정 탭의 발송 메시지 편집기(제목/본문)를 관리자가 이미 고치기
+  //   시작했으면, 늦게 도착한 getConfig()의 cfg.messageTemplate이 그 입력값을
+  //   조용히 덮어쓰지 않게 막는다.
+  const messageTemplateTouchedRef = useRef(false);
   const [isDrawing, setIsDrawing] = useState(false);
   const [isInvalidLink, setIsInvalidLink] = useState(false);
   // ⭐ 관리자 전용 화면(작성/수정/설정 탭, 승인 화면) 접근을 비밀번호로 막는다.
@@ -1153,14 +1180,18 @@
         //   weeklyWorkHours는 설정 탭에 별도 입력칸이 없는 파생값이라 cfg.defaults에 안 들어있으므로,
         //   handleChange의 autoWeekly와 동일하게 daily*days로 직접 재계산해줘야 한다. 안 그러면
         //   useState 초기값('40')에 머문 채로 계약서에 틀린 주간 근로시간이 찍힌다.
-        if (!hasId) setFormData(prev => {
+        //   companyTouchedRef와 같은 이유로, 이미 관리자가 직접 고친 필드가 있으면
+        //   (defaultsTouchedRef) 늦게 도착한 이 응답으로 되돌리지 않는다.
+        if (!hasId && !defaultsTouchedRef.current) setFormData(prev => {
           const merged = { ...prev, ...cfg.defaults };
           const daily = parseFloat(merged.dailyWorkHours || 0);
           const days = parseFloat(merged.weeklyWorkDays || 0);
           return { ...merged, weeklyWorkHours: String(daily * days) };
         });
       }
-      if (cfg && cfg.messageTemplate) setMessageTemplate(cfg.messageTemplate);
+      // ⭐ 설정 탭의 발송 메시지 편집기를 이미 고치기 시작했으면(messageTemplateTouchedRef)
+      //   늦게 도착한 이 응답이 입력 중인 제목/본문을 조용히 되돌리지 않게 막는다.
+      if (cfg && cfg.messageTemplate && !messageTemplateTouchedRef.current) setMessageTemplate(cfg.messageTemplate);
     }).withFailureHandler(err => console.error('법인 목록 로드 실패(기본값 사용):', err)).getConfig();
   }, []);
 
@@ -1206,16 +1237,24 @@
     } else if (name === 'empPhone') {
       setFormData({ ...formData, [name]: autoHyphenPhone(newVal) });
     } else if (name === 'dutiesSelect') {
+      defaultsTouchedRef.current = true;
       if (newVal === '직접입력') setFormData({ ...formData, isDirectDuties: true, duties: formData.dutiesDirect });
       else setFormData({ ...formData, isDirectDuties: false, duties: newVal });
     } else if (name === 'dutiesDirect') {
+      defaultsTouchedRef.current = true;
       setFormData({ ...formData, dutiesDirect: newVal, duties: newVal });
     } else if (name === 'dailyWorkHours' || name === 'weeklyWorkDays') {
+        defaultsTouchedRef.current = true;
         const daily = name === 'dailyWorkHours' ? parseFloat(newVal || 0) : parseFloat(formData.dailyWorkHours || 0);
         const days = name === 'weeklyWorkDays' ? parseFloat(newVal || 0) : parseFloat(formData.weeklyWorkDays || 0);
         const autoWeekly = (daily * days);
         setFormData({ ...formData, [name]: newVal, weeklyWorkHours: String(autoWeekly) });
     } else {
+      // ⭐ workPlace/startTime/endTime/breakTimeMinutes/breakTimeStart/breakTimeEnd도 설정 탭
+      //   기본값(cfg.defaults)과 겹치는 필드라 defaultsTouchedRef 대상에 포함한다.
+      if (['workPlace', 'startTime', 'endTime', 'breakTimeMinutes', 'breakTimeStart', 'breakTimeEnd'].includes(name)) {
+        defaultsTouchedRef.current = true;
+      }
       setFormData({ ...formData, [name]: newVal });
     }
   };
@@ -1496,16 +1535,7 @@
               <div className="space-y-6">
                 <h3 className="text-2xl font-bold border-b-2 border-black pb-2 mb-4 text-center">근 로 계 약 서</h3>
                 <div className="text-right text-sm mb-4 font-bold">입사일 : {formatDate(formData.joinDate)}</div>
-                <table className="c-table mb-8 text-sm">
-                  <tbody>
-                    <tr><td rowSpan="3" className="bg-gray-label w-24">사용자<br/>("갑")</td><td className="bg-gray-label w-20">명 칭</td><td className="pl-4 font-bold">{formData.companyName}</td></tr>
-                    <tr><td className="bg-gray-label">주 소</td><td className="pl-4">{formData.companyAddress}</td></tr>
-                    <tr><td className="bg-gray-label">전화번호</td><td className="pl-4">{formData.companyPhone}</td></tr>
-                    <tr><td rowSpan="3" className="bg-gray-label">근로자<br/>(을)</td><td className="bg-gray-label">성명</td><td className="pl-4"><span>{formData.empName}</span> <span className="text-gray-600 ml-2">(주민등록번호: {formData.empRegNumber})</span></td></tr>
-                    <tr><td className="bg-gray-label">주 소</td><td className="pl-4">{formData.empAddress}</td></tr>
-                    <tr><td className="bg-gray-label">연락처</td><td className="pl-4">{formData.empPhone}</td></tr>
-                  </tbody>
-                </table>
+                <PartyInfoTable formData={formData} />
                 <p><strong>{formData.companyName}</strong>에 재직 중 근로기준법과 취업규칙 및 제반규정을 성실히 준수할 것을 서약하고 다음과 같이 근로계약을 체결한다.</p>
               </div>
             )}
@@ -1695,16 +1725,7 @@
                 <div className="bg-white border-2 border-gray-400 p-4 rounded h-96 overflow-y-scroll text-xs leading-relaxed">
                   <h1 className="text-2xl font-bold text-center mb-6">근 로 계 약 서</h1>
                   <div className="text-right mb-2 text-sm font-bold">입사일 : {formatDate(formData.joinDate)}</div>
-                  <table className="c-table mb-8 text-sm">
-                    <tbody>
-                      <tr><td rowSpan="3" className="bg-gray-label w-24">사용자<br/>("갑")</td><td className="bg-gray-label w-20">명 칭</td><td className="pl-4 font-bold">{formData.companyName}</td></tr>
-                      <tr><td className="bg-gray-label">주 소</td><td className="pl-4">{formData.companyAddress}</td></tr>
-                      <tr><td className="bg-gray-label">전화번호</td><td className="pl-4">{formData.companyPhone}</td></tr>
-                      <tr><td rowSpan="3" className="bg-gray-label">근로자<br/>(을)</td><td className="bg-gray-label">성명</td><td className="pl-4"><span>{formData.empName}</span> <span className="text-gray-600 ml-2">(주민등록번호: {formData.empRegNumber})</span></td></tr>
-                      <tr><td className="bg-gray-label">주 소</td><td className="pl-4">{formData.empAddress}</td></tr>
-                      <tr><td className="bg-gray-label">연락처</td><td className="pl-4">{formData.empPhone}</td></tr>
-                    </tbody>
-                  </table>
+                  <PartyInfoTable formData={formData} />
 
                   <div className="mb-4 border-b border-black pb-2 text-sm"><strong>{formData.companyName}</strong>에 재직 중 근로기준법과 취업규칙 및 제반규정을 성실히 준수할 것을 서약하고 다음과 같이 근로계약을 체결한다.</div>
                   <ContractArticles formData={formData} clauses={clauses} className="space-y-4 break-keep text-sm" />
@@ -1951,7 +1972,7 @@
                 {adminTab === '설정' && (
                   <>
                     <SettingsPanel companies={companies} setCompanies={setCompanies} defaults={defaults} setDefaults={setDefaults} />
-                    <MessageTemplateEditor messageTemplate={messageTemplate} setMessageTemplate={setMessageTemplate} />
+                    <MessageTemplateEditor messageTemplate={messageTemplate} setMessageTemplate={setMessageTemplate} touchedRef={messageTemplateTouchedRef} />
                   </>
                 )}
                 {adminTab === '관리' && (<AdminAccountPanel />)}
@@ -1994,16 +2015,7 @@
               <h1 className="text-4xl font-extrabold text-center mb-10 underline tracking-widest">근 로 계 약 서</h1>
               <div className="text-right text-sm mb-4 font-bold">입사일 : {formatDate(formData.joinDate)}</div>
               
-              <table className="c-table mb-8 text-sm">
-                <tbody>
-                  <tr><td rowSpan="3" className="bg-gray-label w-24">사용자<br/>("갑")</td><td className="bg-gray-label w-20">명 칭</td><td className="pl-4 font-bold">{formData.companyName}</td></tr>
-                  <tr><td className="bg-gray-label">주 소</td><td className="pl-4">{formData.companyAddress}</td></tr>
-                  <tr><td className="bg-gray-label">전화번호</td><td className="pl-4">{formData.companyPhone}</td></tr>
-                  <tr><td rowSpan="3" className="bg-gray-label">근로자<br/>("을")</td><td className="bg-gray-label">성 명</td><td className="pl-4"><span>{formData.empName}</span> <span className="text-gray-600 ml-2">(주민등록번호: {formData.empRegNumber})</span></td></tr>
-                  <tr><td className="bg-gray-label">주 소</td><td className="pl-4">{formData.empAddress}</td></tr>
-                  <tr><td className="bg-gray-label">연락처</td><td className="pl-4">{formData.empPhone}</td></tr>
-                </tbody>
-              </table>
+              <PartyInfoTable formData={formData} />
 
               <div className="mb-8 border-b border-black pb-4 text-base"><strong>{formData.companyName}</strong>에 재직 중 근로기준법과 취업규칙 및 제반규정을 성실히 준수할 것을 서약하고 다음과 같이 근로계약을 체결한다.</div>
               
