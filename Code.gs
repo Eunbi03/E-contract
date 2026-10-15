@@ -422,6 +422,12 @@ function loadSignedDataForAdmin(id, password) {
 }
 
 // 3-5. saveContractData(data)
+// ⭐ 근로자가 바꿀 수 있는 값만 받아들인다. 예전에는 화면에서 넘어온 data 전체를 그대로 저장해서,
+//   근로자가 브라우저 개발자도구로 근무조건(근로시간·수습급여·계약기간 등)을 고친 채 제출해도 그대로
+//   승인대기에 쌓였다. 이제 관리자가 발송한 원본(계약대기의 JSON)을 기준으로 삼고 아래 필드만
+//   근로자 입력으로 덮어쓴다.
+var WORKER_EDITABLE_FIELDS = ['empName', 'empPhone', 'empRegNumber', 'empAddress', 'sign1', 'sign2', 'sign3', 'sign4'];
+
 function saveContractData(data) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   // ⭐ 승인대기 시트 목록
@@ -429,9 +435,8 @@ function saveContractData(data) {
     s.appendRow(['ID', '법인', '성명', '전화번호', '이메일', '수신시간', '현황', '승인링크', '완료데이터(JSON)']);
   });
 
-  var uniqueId = data.contractId;
-  data.status = 'SIGNED_BY_WORKER';
-  data.workerSignedAt = new Date().toLocaleString();
+  var uniqueId = data && data.contractId;
+  if (!uniqueId) throw new Error('계약서 ID가 없습니다.');
   // ⭐ mode=review(관리자 승인 전용) — mode=view는 완료된 계약서를 보는 용도(근로자 다운로드
   //   링크, "계약목록"의 문서링크)라 그쪽은 비밀번호를 요구하면 근로자가 막힌다. 아직 승인 전인
   //   이 링크만 mode=review로 발급해서 비밀번호 확인 없이는 데이터 자체가 안 내려가게 한다.
@@ -445,42 +450,70 @@ function saveContractData(data) {
     if (findRowById(targetSheet, uniqueId, 0) || findContractIdInList(ss.getSheetByName('계약목록'), uniqueId)) {
       return "Success";
     }
+    var draftRow = findRowById(ss.getSheetByName('계약대기'), uniqueId, 0);
+    if (!draftRow) throw new Error('유효하지 않은 계약서입니다.');
+    var saved = JSON.parse(draftRow[6]);
+    WORKER_EDITABLE_FIELDS.forEach(function (f) {
+      if (data[f] !== undefined) saved[f] = data[f];
+    });
+    if (!saved.empName || !saved.empRegNumber || !saved.empAddress || !saved.empPhone) {
+      throw new Error('근로자 정보(성명/연락처/주민등록번호/주소)가 모두 입력되지 않았습니다.');
+    }
+    if (!saved.sign1 || !saved.sign2 || !saved.sign3 || !saved.sign4) {
+      throw new Error('서명이 모두 완료되지 않았습니다.');
+    }
+    // ⭐ 본인인증 비밀번호는 승인대기/계약목록으로 넘기지 않는다(관리자 화면, 완료 다운로드 링크로 내려가므로).
+    delete saved.contractPassword;
+    saved.contractId = uniqueId;
+    saved.status = 'SIGNED_BY_WORKER';
+    saved.workerSignedAt = new Date().toLocaleString();
+
     // ⭐ 승인대기 시트 저장 데이터 설정
     targetSheet.appendRow([
-      uniqueId, data.companyName || '', data.empName || '', data.empPhone || '', data.workerContactEmail || '',
-      new Date(), 'SIGNED_BY_WORKER', viewLink, JSON.stringify(data)
+      uniqueId, saved.companyName || '', saved.empName || '', saved.empPhone || '', saved.workerContactEmail || '',
+      new Date(), 'SIGNED_BY_WORKER', viewLink, JSON.stringify(saved)
     ]);
     deleteRowById(ss.getSheetByName('계약대기'), uniqueId, 0);
     return "Success";
   });
 }
 
-// 3-6. approveContract(data)
-function approveContract(data) {
+// 3-6. approveContract(id, password)
+// ⭐ 예전에는 approveContract(data)가 비밀번호 확인 없이 화면이 넘긴 data를 그대로 계약목록에 올렸다.
+//   승인 화면은 비밀번호로 막혀 있었지만 google.script.run 함수는 웹앱 링크만 있으면 누구나 직접
+//   부를 수 있어서, 자기 계약서 ID를 아는 근로자가 개발자도구로 스스로 "승인"(직인 날인)할 수 있었다.
+//   이제 관리자 비밀번호를 서버에서 다시 확인하고, 데이터도 승인대기 시트의 원본(근로자가 제출한 그대로)을 쓴다.
+function approveContract(id, password) {
+  if (!verifyAdminPassword(password)) return 'WRONG_PASSWORD';
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  data.status = 'COMPLETED';
-  data.approvedAt = new Date().toLocaleString();
+  var data = null;
   // ⭐ 계약목록 시트 목록 — 주민등록번호는 별도 열로 두지 않는다(민감정보라 한눈에 보이는
   //   목록에는 안 올리는 편이 안전). 필요하면 마지막 "데이터(JSON)" 열 안에 그대로 들어있다.
   var listSheet = getOrCreateSheet_(ss, '계약목록', function (s) {
     s.appendRow(['법인', '성명', '전화번호', '주소', '입사일', '발송일시', '제출일시', '완료일시', '문서링크', '데이터(JSON)']);
   });
 
-  var viewLink = ScriptApp.getService().getUrl() + "?id=" + data.contractId + "&mode=view";
+  var viewLink = ScriptApp.getService().getUrl() + "?id=" + id + "&mode=view";
 
   // ⭐ 중복 승인 방지 — 이미 계약목록에 들어가 있으면(=이미 승인 처리됨) 또 행을 쌓거나
   //   완료 안내를 중복 발송하지 않는다. 승인대기에서 이미 사라졌다면(=방금 다른 요청이 먼저
   //   승인 완료) 마찬가지로 중복 호출로 보고 건너뛴다.
   var alreadyApproved = withLock(function () {
-    if (findContractIdInList(listSheet, data.contractId)) return true;
-    if (!findRowById(ss.getSheetByName('승인대기'), data.contractId, 0)) return true;
+    if (findContractIdInList(listSheet, id)) return true;
+    var pendingRow = findRowById(ss.getSheetByName('승인대기'), id, 0);
+    if (!pendingRow) return true;
+
+    data = JSON.parse(pendingRow[8]);
+    data.contractId = id;
+    data.status = 'COMPLETED';
+    data.approvedAt = new Date().toLocaleString();
 
     // ⭐ 계약목록 시트 저장 데이터 설정
     listSheet.appendRow([
       data.companyName, data.empName, data.empPhone, data.empAddress, data.joinDate,
       data.sentAt || "", data.workerSignedAt || "", data.approvedAt, viewLink, JSON.stringify(data)
     ]);
-    deleteRowById(ss.getSheetByName('승인대기'), data.contractId, 0);
+    deleteRowById(ss.getSheetByName('승인대기'), id, 0);
     return false;
   });
   if (alreadyApproved) return "Approved";

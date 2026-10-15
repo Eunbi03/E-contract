@@ -483,7 +483,7 @@
           }
           if (!data) return setErr('유효하지 않거나 이미 처리된 문서입니다.');
           onDataLoaded(data);
-          onAuthed();
+          onAuthed(pw);
         }).withFailureHandler(e => { setChecking(false); setErr('오류가 발생했습니다: ' + e); }).loadSignedDataForAdmin(urlId, pw);
       } else {
         google.script.run.withSuccessHandler(ok => {
@@ -494,7 +494,7 @@
             if (pwInputRef.current) pwInputRef.current.focus();
             return;
           }
-          onAuthed();
+          onAuthed(pw);
         }).withFailureHandler(e => { setChecking(false); setErr('오류가 발생했습니다: ' + e); }).verifyAdminPassword(pw);
       }
     };
@@ -1029,6 +1029,9 @@
   //   adminReviewMode: ?mode=review 링크(승인대기의 "승인링크")로 들어온 경우만 true —
   //   근로자에게 가는 ?mode=view(완료 다운로드) 링크는 건드리지 않아 근로자 경험에는 영향 없다.
   const [isAdminAuthed, setIsAdminAuthed] = useState(false);
+  // ⭐ 관리자 비밀번호 — 승인(approveContract) 때 서버에서 다시 확인하도록 게이트 통과 시 기억해둔다.
+  //   화면 메모리에만 두고 어디에도 저장하지 않는다.
+  const adminPasswordRef = useRef('');
   const [adminReviewMode, setAdminReviewMode] = useState(false);
   const needsAdminGate = step === 1 || (step === 3 && adminReviewMode);
 
@@ -1125,8 +1128,19 @@
           google.script.run.withSuccessHandler(data => {
             clearTimeout(timeoutId); setLoading(false);
             if (data === "ALREADY_COMPLETED") {
-              setStep(3); setContractStatus('COMPLETED');
-              return alert("이미 최종 완료된 계약서입니다.");
+              // ⭐ 처음 받은 서명 링크를 계약 완료 후에 다시 열어도, 빈 계약서가 아니라 완료된 계약서
+              //   (mode=view와 같은 화면)를 보여준다 — 근로자가 완료 안내 대신 처음 링크를 다시 누르는 경우.
+              setLoading(true);
+              google.script.run.withSuccessHandler(done => {
+                setLoading(false);
+                if (!done) { setIsInvalidLink(true); return; }
+                setIsManagerView(true);
+                setFormData(done);
+                setSignatures({ sign1: done.sign1, sign2: done.sign2, sign3: done.sign3, sign4: done.sign4 });
+                setContractStatus('COMPLETED');
+                setStep(3);
+              }).withFailureHandler(err => { setLoading(false); console.error('계약서 로드 실패:', err); setIsInvalidLink(true); }).loadSignedData(id);
+              return;
             }
             if (data === "ALREADY_SUBMITTED") {
               // ⭐ 이미 서명 제출을 마치고 승인 대기 중인 상태 — 재작성은 막되, "유효하지 않은 링크"가
@@ -1161,8 +1175,14 @@
   // 새 계약서를 처음 작성하는 경우(id 없음)에는 목록의 첫 번째 법인으로 기본값도 맞춰준다.
   useEffect(() => {
     if (!(window.google && window.google.script)) return;
+    // ⭐ id는 첫 번째 useEffect와 똑같이 "주소창 ?id= 또는 서버 템플릿이 넣어준 hidden input"
+    //   둘 다에서 찾는다. Apps Script 웹앱은 화면이 iframe 안에서 돌아서 window.location.search에
+    //   ?id=가 안 보일 수 있다 — 주소창만 보면 근로자 링크도 "새 계약서 작성"으로 오인해서,
+    //   늦게 도착한 기본값(근무장소/근로시간 등)이 근로자의 계약 데이터를 덮어쓴다.
     const urlParams = new URLSearchParams(window.location.search);
-    const hasId = !!urlParams.get('id');
+    const idInput = document.getElementById('data-contract-id');
+    const rawId = urlParams.get('id') || (idInput ? idInput.value : '');
+    const hasId = !!rawId && rawId !== 'null';
     google.script.run.withSuccessHandler(cfg => {
       if (cfg && cfg.companies && cfg.companies.length) {
         setCompanies(cfg.companies);
@@ -1410,9 +1430,13 @@
   // 4-4. 주요 헬퍼 함수 (Index.html)
   // ⭐ (관리자)최종 승인 확인
   const managerApprove = () => {
-    if(!confirm("이대로 계약을 최종 승인하고 직인을 날인하시겠습니까?\n근로자에게 완료 메일(PDF 첨부)이 자동 발송됩니다.")) return;
+    if(!confirm("이대로 계약을 최종 승인하고 직인을 날인하시겠습니까?\n근로자에게 완료 안내(이메일/문자)가 자동 발송됩니다.")) return;
     setLoading(true);
-    google.script.run.withSuccessHandler(() => {
+    google.script.run.withSuccessHandler(approveResult => {
+      if (approveResult === 'WRONG_PASSWORD') {
+        setLoading(false);
+        return alert("관리자 비밀번호가 확인되지 않아 승인하지 못했습니다. 승인 링크를 다시 열어 비밀번호를 입력해 주세요.");
+      }
       // ⭐ 이 법인의 직인 이미지를 먼저 받아온 뒤에 COMPLETED로 전환한다. 순서를 반대로 하면
       //   자동 아카이빙(#print-area 캡처)이 직인 이미지가 도착하기 전 화면을 스냅샷으로
       //   떠버릴 수 있다.
@@ -1441,7 +1465,7 @@
         setContractStatus('COMPLETED');
         alert("최종 승인은 완료되었습니다. 다만 직인 이미지 조회 중 오류가 발생해 직인 없이 저장됩니다.\n\n오류: " + sealErr);
       }).getSealImage(formData.companyName);
-    }).withFailureHandler(handleServerError).approveContract({ ...formData, ...signatures, contractId: urlId });
+    }).withFailureHandler(handleServerError).approveContract(urlId, adminPasswordRef.current);
   };
 
   // ⭐ 승인 직후(직인이 찍힌 최종본이 렌더링된 시점) 화면에 보이는 계약서 그대로를 서버로 보내
@@ -1776,7 +1800,7 @@
           <AdminPasswordGate
             reviewMode={adminReviewMode}
             urlId={urlId}
-            onAuthed={() => setIsAdminAuthed(true)}
+            onAuthed={pw => { adminPasswordRef.current = pw; setIsAdminAuthed(true); }}
             onDataLoaded={data => {
               setFormData(data);
               setSignatures({ sign1: data.sign1, sign2: data.sign2, sign3: data.sign3, sign4: data.sign4 });
