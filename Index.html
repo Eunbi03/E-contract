@@ -445,6 +445,10 @@
         <input className="p-2 border rounded text-sm" placeholder="담당자 연락처" value={draft.managerPhone} onChange={e => setDraft({ ...draft, managerPhone: e.target.value })} />
         <input className="p-2 border rounded text-sm" placeholder="담당자 이메일" value={draft.managerEmail} onChange={e => setDraft({ ...draft, managerEmail: e.target.value })} />
       </div>
+      <input className="w-full p-2 border rounded text-sm" placeholder="발신 이메일 (비우면 스크립트 소유자 계정으로 발송)" value={draft.senderEmail || ''} onChange={e => setDraft({ ...draft, senderEmail: e.target.value })} />
+      <p className="text-[11px] text-gray-500 leading-tight">발신 이메일은 스크립트 소유자 Gmail의 [설정 → 계정 → 다른 주소에서 메일 보내기]에 등록·인증된 주소여야 합니다.</p>
+      <input className="w-full p-2 border rounded text-sm" placeholder="문자 발신번호 (비우면 담당자 연락처로 발송)" value={draft.senderPhone || ''} onChange={e => setDraft({ ...draft, senderPhone: e.target.value })} />
+      <p className="text-[11px] text-gray-500 leading-tight">문자 발신번호는 Solapi 콘솔에 발신번호로 등록된 번호여야 합니다.</p>
       <div className="flex gap-2 pt-1">
         <button onClick={onSave} disabled={saving} className="flex-1 py-2 bg-blue-600 text-white rounded font-bold text-sm disabled:opacity-50">{saving ? '저장 중...' : '저장'}</button>
         <button onClick={onCancel} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded font-bold text-sm">취소</button>
@@ -483,7 +487,7 @@
           }
           if (!data) return setErr('유효하지 않거나 이미 처리된 문서입니다.');
           onDataLoaded(data);
-          onAuthed();
+          onAuthed(pw);
         }).withFailureHandler(e => { setChecking(false); setErr('오류가 발생했습니다: ' + e); }).loadSignedDataForAdmin(urlId, pw);
       } else {
         google.script.run.withSuccessHandler(ok => {
@@ -494,7 +498,7 @@
             if (pwInputRef.current) pwInputRef.current.focus();
             return;
           }
-          onAuthed();
+          onAuthed(pw);
         }).withFailureHandler(e => { setChecking(false); setErr('오류가 발생했습니다: ' + e); }).verifyAdminPassword(pw);
       }
     };
@@ -585,7 +589,7 @@
     useEffect(() => { if (defaults) setDefaultsDraft(defaults); }, [defaults]);
 
     const startEdit = (idx) => { setEditingIdx(idx); setDraft({ ...companies[idx] }); };
-    const startNew = () => { setEditingIdx('new'); setDraft({ name: '', address: '', phone: '', rep: '', managerName: '', managerPhone: '', managerEmail: '' }); };
+    const startNew = () => { setEditingIdx('new'); setDraft({ name: '', address: '', phone: '', rep: '', managerName: '', managerPhone: '', managerEmail: '', senderEmail: '', senderPhone: '' }); };
     const cancelEdit = () => { setEditingIdx(null); setDraft(null); };
 
     const saveCompany = () => {
@@ -635,6 +639,7 @@
                     <div className="text-gray-500">{c.address}</div>
                     <div className="text-gray-500">{c.phone} · 대표 {c.rep}</div>
                     <div className="text-gray-500">담당자 {c.managerName} · {c.managerPhone} · {c.managerEmail}</div>
+                    <div className="text-gray-500">발신 이메일 {c.senderEmail || '(스크립트 소유자 계정)'} · 문자 발신번호 {c.senderPhone || '(담당자 연락처)'}</div>
                   </div>
                   <div className="flex gap-2 shrink-0">
                     <button onClick={() => startEdit(idx)} className="text-xs text-blue-600 font-bold">수정</button>
@@ -1002,6 +1007,9 @@
   const draggedChipRef = useRef(null);
   const [step, setStep] = useState(1); 
   const [loading, setLoading] = useState(false);
+  // ⭐ 첫 화면 로딩이 8초를 넘으면 "조금 더 기다려 달라" 안내를 보여준다(로딩이 끝나면 자동으로 지움).
+  const [slowNotice, setSlowNotice] = useState(false);
+  useEffect(() => { if (!loading) setSlowNotice(false); }, [loading]);
   const [workerStep, setWorkerStep] = useState(1);
   const [verificationInput, setVerificationInput] = useState('');
   const [isIdentityVerified, setIsIdentityVerified] = useState(false);
@@ -1029,6 +1037,9 @@
   //   adminReviewMode: ?mode=review 링크(승인대기의 "승인링크")로 들어온 경우만 true —
   //   근로자에게 가는 ?mode=view(완료 다운로드) 링크는 건드리지 않아 근로자 경험에는 영향 없다.
   const [isAdminAuthed, setIsAdminAuthed] = useState(false);
+  // ⭐ 관리자 비밀번호 — 승인(approveContract) 때 서버에서 다시 확인하도록 게이트 통과 시 기억해둔다.
+  //   화면 메모리에만 두고 어디에도 저장하지 않는다.
+  const adminPasswordRef = useRef('');
   const [adminReviewMode, setAdminReviewMode] = useState(false);
   const needsAdminGate = step === 1 || (step === 3 && adminReviewMode);
 
@@ -1092,7 +1103,10 @@
       //   절대 true가 되지 않아 복구 로직이 죽은 코드가 된다. 대신 아래 모든 응답 경로가
       //   응답을 받는 즉시 clearTimeout(timeoutId)을 호출하므로, 8초 뒤에도 이 콜백이 아직
       //   살아있다는 것 자체가 "진짜 응답 없음"이라는 뜻이다 — 조건 없이 바로 복구한다.
-      const timeoutId = setTimeout(() => { setLoading(false); alert("서버 응답 지연."); }, 8000);
+      // ⭐ 8초가 지나도 응답이 없으면 예전엔 로딩을 풀고 "서버 응답 지연" 알림을 띄웠는데, 그러면
+      //   응답이 오기 전의 빈 화면(관리자 비밀번호 화면 등)이 보여서 "링크가 안 열린다"로 보였다.
+      //   이제 로딩 화면은 유지하고 "조금 더 기다려 달라"는 안내만 덧붙인다(응답이 오면 그대로 열림).
+      const timeoutId = setTimeout(() => setSlowNotice(true), 8000);
 
       if (window.google && window.google.script) {
         if (mode === 'review') {
@@ -1125,8 +1139,19 @@
           google.script.run.withSuccessHandler(data => {
             clearTimeout(timeoutId); setLoading(false);
             if (data === "ALREADY_COMPLETED") {
-              setStep(3); setContractStatus('COMPLETED');
-              return alert("이미 최종 완료된 계약서입니다.");
+              // ⭐ 처음 받은 서명 링크를 계약 완료 후에 다시 열어도, 빈 계약서가 아니라 완료된 계약서
+              //   (mode=view와 같은 화면)를 보여준다 — 근로자가 완료 안내 대신 처음 링크를 다시 누르는 경우.
+              setLoading(true);
+              google.script.run.withSuccessHandler(done => {
+                setLoading(false);
+                if (!done) { setIsInvalidLink(true); return; }
+                setIsManagerView(true);
+                setFormData(done);
+                setSignatures({ sign1: done.sign1, sign2: done.sign2, sign3: done.sign3, sign4: done.sign4 });
+                setContractStatus('COMPLETED');
+                setStep(3);
+              }).withFailureHandler(err => { setLoading(false); console.error('계약서 로드 실패:', err); setIsInvalidLink(true); }).loadSignedData(id);
+              return;
             }
             if (data === "ALREADY_SUBMITTED") {
               // ⭐ 이미 서명 제출을 마치고 승인 대기 중인 상태 — 재작성은 막되, "유효하지 않은 링크"가
@@ -1161,8 +1186,14 @@
   // 새 계약서를 처음 작성하는 경우(id 없음)에는 목록의 첫 번째 법인으로 기본값도 맞춰준다.
   useEffect(() => {
     if (!(window.google && window.google.script)) return;
+    // ⭐ id는 첫 번째 useEffect와 똑같이 "주소창 ?id= 또는 서버 템플릿이 넣어준 hidden input"
+    //   둘 다에서 찾는다. Apps Script 웹앱은 화면이 iframe 안에서 돌아서 window.location.search에
+    //   ?id=가 안 보일 수 있다 — 주소창만 보면 근로자 링크도 "새 계약서 작성"으로 오인해서,
+    //   늦게 도착한 기본값(근무장소/근로시간 등)이 근로자의 계약 데이터를 덮어쓴다.
     const urlParams = new URLSearchParams(window.location.search);
-    const hasId = !!urlParams.get('id');
+    const idInput = document.getElementById('data-contract-id');
+    const rawId = urlParams.get('id') || (idInput ? idInput.value : '');
+    const hasId = !!rawId && rawId !== 'null';
     google.script.run.withSuccessHandler(cfg => {
       if (cfg && cfg.companies && cfg.companies.length) {
         setCompanies(cfg.companies);
@@ -1410,9 +1441,13 @@
   // 4-4. 주요 헬퍼 함수 (Index.html)
   // ⭐ (관리자)최종 승인 확인
   const managerApprove = () => {
-    if(!confirm("이대로 계약을 최종 승인하고 직인을 날인하시겠습니까?\n근로자에게 완료 메일(PDF 첨부)이 자동 발송됩니다.")) return;
+    if(!confirm("이대로 계약을 최종 승인하고 직인을 날인하시겠습니까?\n근로자에게 완료 안내(이메일/문자)가 자동 발송됩니다.")) return;
     setLoading(true);
-    google.script.run.withSuccessHandler(() => {
+    google.script.run.withSuccessHandler(approveResult => {
+      if (approveResult === 'WRONG_PASSWORD') {
+        setLoading(false);
+        return alert("관리자 비밀번호가 확인되지 않아 승인하지 못했습니다. 승인 링크를 다시 열어 비밀번호를 입력해 주세요.");
+      }
       // ⭐ 이 법인의 직인 이미지를 먼저 받아온 뒤에 COMPLETED로 전환한다. 순서를 반대로 하면
       //   자동 아카이빙(#print-area 캡처)이 직인 이미지가 도착하기 전 화면을 스냅샷으로
       //   떠버릴 수 있다.
@@ -1441,7 +1476,7 @@
         setContractStatus('COMPLETED');
         alert("최종 승인은 완료되었습니다. 다만 직인 이미지 조회 중 오류가 발생해 직인 없이 저장됩니다.\n\n오류: " + sealErr);
       }).getSealImage(formData.companyName);
-    }).withFailureHandler(handleServerError).approveContract({ ...formData, ...signatures, contractId: urlId });
+    }).withFailureHandler(handleServerError).approveContract(urlId, adminPasswordRef.current);
   };
 
   // ⭐ 승인 직후(직인이 찍힌 최종본이 렌더링된 시점) 화면에 보이는 계약서 그대로를 서버로 보내
@@ -1475,7 +1510,12 @@
   //   매번 넘기지 않도록 묶어둔다. 반환값은 { title, html } 그대로.
   const stepClause = (num, fallbackTitle, fallbackBody) => resolveClause(num, fallbackTitle, fallbackBody, formData, clauses);
 
-  if (loading) return <div className="h-screen flex items-center justify-center font-bold text-xl">처리중...</div>;
+  if (loading) return (
+    <div className="h-screen flex flex-col items-center justify-center gap-3 p-6 text-center">
+      <div className="font-bold text-xl">처리중...</div>
+      {slowNotice && <div className="text-sm text-gray-500 break-keep">서버 응답이 늦어지고 있습니다. 창을 닫지 말고 잠시만 기다려 주세요.</div>}
+    </div>
+  );
 
   // ⭐ (근로자)접속 링크 유효성 확인
   if (isInvalidLink) {
@@ -1776,7 +1816,7 @@
           <AdminPasswordGate
             reviewMode={adminReviewMode}
             urlId={urlId}
-            onAuthed={() => setIsAdminAuthed(true)}
+            onAuthed={pw => { adminPasswordRef.current = pw; setIsAdminAuthed(true); }}
             onDataLoaded={data => {
               setFormData(data);
               setSignatures({ sign1: data.sign1, sign2: data.sign2, sign3: data.sign3, sign4: data.sign4 });
