@@ -919,8 +919,8 @@ function substituteMessageVariables(template, data) {
 //   최종 승인한 뒤에만(Index.html 쪽에서 그 시점에만 호출) 실제로 쓰인다.
 //   { dataUrl, status, message } 형태로 돌려줘서 managerApprove()가 실패 이유를 관리자에게
 //   alert로 보여줄 수 있다. status: 'ok' | 'no_match' | 'error'
-function getSealImagesMap_() {
-  var html = HtmlService.createHtmlOutputFromFile('Seals').getContent();
+function getSealImagesMap_(html) {
+  html = html || HtmlService.createHtmlOutputFromFile('Seals').getContent();
   var match = html.match(/const\s+sealImages\s*=\s*(\{[\s\S]*?\n\s*\});/);
   if (!match) {
     throw new Error('Seals.html에서 "const sealImages = { ... };" 형태의 객체를 찾을 수 없습니다.');
@@ -933,22 +933,105 @@ function getSealImagesMap_() {
   }
 }
 
-function getSealImage(companyName) {
-  var map;
+// ⭐ 완료 계약서를 열 때 "서버 응답 지연"이 나던 원인 — Seals.html에는 모든 법인의 직인 base64가
+//   통째로 들어 있어 용량이 크다. 예전에는 열람할 때마다 그 파일 전체를 읽고(eval로) 객체 전체를
+//   만들어 한 장을 꺼냈다. 이제 ① 요청한 법인 한 장만 정규식으로 바로 잘라내고(eval 없이),
+//   ② 꺼낸 결과를 CacheService에 6시간 보관해서 다음부터는 Seals.html을 아예 읽지 않는다.
+//   Seals.html의 직인을 바꿨다면 편집기에서 clearSealCache를 한 번 실행하면 바로 반영된다.
+var SEAL_CACHE_SECONDS = 6 * 60 * 60;   // CacheService 최대 보관 시간
+var SEAL_CACHE_CHUNK = 90000;            // 캐시 값 1개당 100KB 제한 → 나눠서 저장
+
+function sealCacheKey_(companyName) {
+  var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, String(companyName), Utilities.Charset.UTF_8);
+  return 'seal_' + Utilities.base64EncodeWebSafe(digest);
+}
+
+function readSealCache_(key) {
   try {
-    map = getSealImagesMap_();
+    var cache = CacheService.getScriptCache();
+    var n = Number(cache.get(key + '_n'));
+    if (!n) return null;
+    var keys = [];
+    for (var i = 0; i < n; i++) keys.push(key + '_' + i);
+    var parts = cache.getAll(keys);
+    var out = '';
+    for (var j = 0; j < keys.length; j++) {
+      if (parts[keys[j]] == null) return null;
+      out += parts[keys[j]];
+    }
+    return out;
   } catch (e) {
-    Logger.log('직인 이미지 맵 로드 실패: ' + e);
+    return null;
+  }
+}
+
+function writeSealCache_(key, value) {
+  try {
+    var obj = {};
+    var n = 0;
+    for (var i = 0; i < value.length; i += SEAL_CACHE_CHUNK) obj[key + '_' + (n++)] = value.substr(i, SEAL_CACHE_CHUNK);
+    obj[key + '_n'] = String(n);
+    CacheService.getScriptCache().putAll(obj, SEAL_CACHE_SECONDS);
+  } catch (e) {
+    Logger.log('직인 캐시 저장 실패(무시하고 계속): ' + e);
+  }
+}
+
+// ⭐ Seals.html 텍스트에서 '법인명': 'data:image/...' 한 항목만 잘라낸다. 못 찾으면 null.
+function extractSealFromHtml_(html, companyName) {
+  var esc = String(companyName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  var re = new RegExp('([\'"])' + esc + '\\1\\s*:\\s*([\'"])(data:image\\/[^\'"]+)\\2');
+  var m = html.match(re);
+  return m ? m[3] : null;
+}
+
+function getSealImage(companyName) {
+  var key = sealCacheKey_(companyName);
+  var cached = readSealCache_(key);
+  if (cached) return { dataUrl: cached, status: 'ok' };
+
+  var html;
+  try {
+    html = HtmlService.createHtmlOutputFromFile('Seals').getContent();
+  } catch (e) {
+    Logger.log('Seals.html 로드 실패: ' + e);
     return { dataUrl: '', status: 'error', message: String(e) };
   }
-  var dataUrl = map[companyName];
+  var dataUrl = extractSealFromHtml_(html, companyName);
   if (!dataUrl) {
-    return {
-      dataUrl: '', status: 'no_match',
-      message: '"' + companyName + '"에 해당하는 직인 이미지가 Seals.html의 sealImages에 없습니다. 등록된 법인명: ' + (Object.keys(map).join(', ') || '(없음)')
-    };
+    // ⭐ 빠른 방식으로 못 찾았을 때만 예전처럼 객체 전체를 해석한다(따옴표 없는 키 등 예외 형식 대비,
+    //   못 찾은 이유와 등록된 법인명 목록을 알려주기 위해서도 필요).
+    var map;
+    try {
+      map = getSealImagesMap_(html);
+    } catch (e) {
+      Logger.log('직인 이미지 맵 로드 실패: ' + e);
+      return { dataUrl: '', status: 'error', message: String(e) };
+    }
+    dataUrl = map[companyName];
+    if (!dataUrl) {
+      return {
+        dataUrl: '', status: 'no_match',
+        message: '"' + companyName + '"에 해당하는 직인 이미지가 Seals.html의 sealImages에 없습니다. 등록된 법인명: ' + (Object.keys(map).join(', ') || '(없음)')
+      };
+    }
   }
+  writeSealCache_(key, dataUrl);
   return { dataUrl: dataUrl, status: 'ok' };
+}
+
+// ⭐ Seals.html의 직인 이미지를 바꾼 뒤 바로 반영하고 싶을 때 편집기에서 한 번 실행한다
+//   (안 해도 최대 6시간 뒤에는 자동으로 새 이미지를 읽는다).
+function clearSealCache() {
+  var names = getCompanySettings().map(function (c) { return c.name; });
+  var cache = CacheService.getScriptCache();
+  names.forEach(function (name) {
+    var key = sealCacheKey_(name);
+    var keys = [key + '_n'];
+    for (var i = 0; i < 50; i++) keys.push(key + '_' + i);
+    cache.removeAll(keys);
+  });
+  Logger.log('직인 캐시 삭제: ' + names.join(', '));
 }
 
 // ⭐ Solapi API 자격증명 — 코드에 직접 적지 않고 스크립트 속성에서 읽는다.

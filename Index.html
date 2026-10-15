@@ -1007,6 +1007,9 @@
   const draggedChipRef = useRef(null);
   const [step, setStep] = useState(1); 
   const [loading, setLoading] = useState(false);
+  // ⭐ 첫 화면 로딩이 8초를 넘으면 "조금 더 기다려 달라" 안내를 보여준다(로딩이 끝나면 자동으로 지움).
+  const [slowNotice, setSlowNotice] = useState(false);
+  useEffect(() => { if (!loading) setSlowNotice(false); }, [loading]);
   const [workerStep, setWorkerStep] = useState(1);
   const [verificationInput, setVerificationInput] = useState('');
   const [isIdentityVerified, setIsIdentityVerified] = useState(false);
@@ -1100,7 +1103,10 @@
       //   절대 true가 되지 않아 복구 로직이 죽은 코드가 된다. 대신 아래 모든 응답 경로가
       //   응답을 받는 즉시 clearTimeout(timeoutId)을 호출하므로, 8초 뒤에도 이 콜백이 아직
       //   살아있다는 것 자체가 "진짜 응답 없음"이라는 뜻이다 — 조건 없이 바로 복구한다.
-      const timeoutId = setTimeout(() => { setLoading(false); alert("서버 응답 지연."); }, 8000);
+      // ⭐ 8초가 지나도 응답이 없으면 예전엔 로딩을 풀고 "서버 응답 지연" 알림을 띄웠는데, 그러면
+      //   응답이 오기 전의 빈 화면(관리자 비밀번호 화면 등)이 보여서 "링크가 안 열린다"로 보였다.
+      //   이제 로딩 화면은 유지하고 "조금 더 기다려 달라"는 안내만 덧붙인다(응답이 오면 그대로 열림).
+      const timeoutId = setTimeout(() => setSlowNotice(true), 8000);
 
       if (window.google && window.google.script) {
         if (mode === 'review') {
@@ -1504,7 +1510,12 @@
   //   매번 넘기지 않도록 묶어둔다. 반환값은 { title, html } 그대로.
   const stepClause = (num, fallbackTitle, fallbackBody) => resolveClause(num, fallbackTitle, fallbackBody, formData, clauses);
 
-  if (loading) return <div className="h-screen flex items-center justify-center font-bold text-xl">처리중...</div>;
+  if (loading) return (
+    <div className="h-screen flex flex-col items-center justify-center gap-3 p-6 text-center">
+      <div className="font-bold text-xl">처리중...</div>
+      {slowNotice && <div className="text-sm text-gray-500 break-keep">서버 응답이 늦어지고 있습니다. 창을 닫지 말고 잠시만 기다려 주세요.</div>}
+    </div>
+  );
 
   // ⭐ (근로자)접속 링크 유효성 확인
   if (isInvalidLink) {
