@@ -116,14 +116,22 @@ var SEND_QUOTA_RETRY_MS = 60 * 60 * 1000;     // 일일 메일 한도 초과 시
 // 3-2. sendBatchContracts(commonData, workerList)
 function sendBatchContracts(commonData, workerList) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // ⭐ 법인별 발신 이메일/문자 발신번호는 화면 값이 아니라 회사설정 시트에서 직접 읽는다.
+  //   (비워두면 메일은 웹앱 배포 계정, 문자는 담당자연락처로 보낸다.)
+  var company = findCompanySetting_(commonData.companyName);
+  commonData.senderEmail = company ? company.senderEmail : '';
+  commonData.senderPhone = company ? company.senderPhone : '';
   var draftSheet = getOrCreateSheet_(ss, '계약대기', function (s) {
     s.appendRow(['ID', '법인', '성명', '전화번호', '이메일', '발송시간', '데이터']);
   });
 
   var queueSheet = getOrCreateSheet_(ss, '발송큐', function (s) {
-    s.appendRow(['ID', '성명', '이메일', '전화번호', '링크', '모드', '법인명', '담당자명', '담당자연락처', '담당자이메일', '상태', '생성시간', '실패사유']);
+    s.appendRow(['ID', '성명', '이메일', '전화번호', '링크', '모드', '법인명', '담당자명', '담당자연락처', '담당자이메일', '발신이메일', '발신번호', '상태', '생성시간', '실패사유']);
   });
   ensureQueueFailReasonColumn(queueSheet);
+  ensureHeaderColumn_(queueSheet, '발신이메일');
+  ensureHeaderColumn_(queueSheet, '발신번호');
   // ⭐ '발송큐' 행은 이름(헤더)으로 쓴다 — 나중에 열 순서를 바꾸거나 열을 더 추가해도
   //   이름만 같으면 rowFromHeader_가 올바른 칸에 그대로 써준다.
   var queueHeader = queueSheet.getRange(1, 1, 1, queueSheet.getLastColumn()).getValues()[0];
@@ -160,6 +168,7 @@ function sendBatchContracts(commonData, workerList) {
       'ID': uniqueId, '성명': worker.name, '이메일': worker.email || '', '전화번호': worker.password || '',
       '링크': link, '모드': workerMode, '법인명': commonData.companyName,
       '담당자명': commonData.managerName || '', '담당자연락처': commonData.managerPhone || '', '담당자이메일': commonData.managerEmail || '',
+      '발신이메일': commonData.senderEmail || '', '발신번호': commonData.senderPhone || '',
       '상태': 'PENDING', '생성시간': nowStr
     }));
   }
@@ -253,7 +262,9 @@ function processSendQueue() {
       var row = claimedRows[k].row;
       var rcol = claimedRows[k].col;
       var name = row[rcol['성명']], email = row[rcol['이메일']], phone = row[rcol['전화번호']], link = row[rcol['링크']], rowMode = row[rcol['모드']],
-          companyName = row[rcol['법인명']], managerName = row[rcol['담당자명']], managerPhone = row[rcol['담당자연락처']], managerEmail = row[rcol['담당자이메일']];
+          companyName = row[rcol['법인명']], managerName = row[rcol['담당자명']], managerPhone = row[rcol['담당자연락처']], managerEmail = row[rcol['담당자이메일']],
+          senderEmail = rcol['발신이메일'] !== undefined ? row[rcol['발신이메일']] : '',
+          senderPhone = rcol['발신번호'] !== undefined ? String(row[rcol['발신번호']] || '') : '';
 
       var msgVars = {
         workerName: name, companyName: companyName, link: link,
@@ -266,14 +277,12 @@ function processSendQueue() {
       var failReason = '';
       try {
         if (rowMode === 'email') {
-          MailApp.sendEmail({
-            to: email,
-            replyTo: managerEmail,
-            subject: subject,
-            body: messageBody
+          sendEmail_({
+            to: email, replyTo: managerEmail, subject: subject, body: messageBody,
+            senderEmail: senderEmail, name: companyName + ' 인사담당자'
           });
         } else if (rowMode === 'sms') {
-          sendSolapiMessage(phone, managerPhone || '0333400023', messageBody);
+          sendSolapiMessage(phone, smsSenderNumber_(senderPhone, managerPhone), messageBody);
         }
         sentCount++;
       } catch (e) {
@@ -303,6 +312,43 @@ function processSendQueue() {
   }
 
   return { sentCount: sentCount, failCount: failCount };
+}
+
+// ⭐ 헤더에 colName 열이 없으면 끝에 추가한다(예전에 만들어진 시트에 새 열을 붙일 때).
+function ensureHeaderColumn_(sheet, colName) {
+  var lastCol = sheet.getLastColumn();
+  var header = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+  if (header.indexOf(colName) === -1) sheet.getRange(1, lastCol + 1).setValue(colName);
+}
+
+// ⭐ 이메일 발송 공용 — senderEmail(법인별 발신 주소)이 있으면 GmailApp으로 그 주소에서 보내고,
+//   없으면 예전처럼 MailApp(스크립트 소유자 계정)으로 보낸다.
+//   GmailApp의 from은 스크립트 소유자 Gmail에 "다른 주소에서 메일 보내기"(별칭)로 등록·인증된
+//   주소만 쓸 수 있다. 등록 안 된 주소면 Gmail이 내는 애매한 오류 대신 원인을 바로 알려준다.
+function sendEmail_(opts) {
+  var sender = String(opts.senderEmail || '').trim();
+  if (!sender) {
+    var mail = { to: opts.to, subject: opts.subject, body: opts.body };
+    if (opts.replyTo) mail.replyTo = opts.replyTo;
+    if (opts.name) mail.name = opts.name;
+    MailApp.sendEmail(mail);
+    return;
+  }
+  var owner = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
+  var aliases = GmailApp.getAliases().map(function (a) { return String(a).toLowerCase(); });
+  if (sender.toLowerCase() !== owner && aliases.indexOf(sender.toLowerCase()) === -1) {
+    throw new Error('발신이메일 ' + sender + '이(가) 스크립트 소유자(' + owner + ') Gmail의 "다른 주소에서 메일 보내기"에 등록되어 있지 않습니다.');
+  }
+  var options = { from: sender };
+  if (opts.replyTo) options.replyTo = opts.replyTo;
+  if (opts.name) options.name = opts.name;
+  GmailApp.sendEmail(opts.to, opts.subject, opts.body, options);
+}
+
+// ⭐ 문자 발신번호 결정 — 법인 발신번호 → 담당자연락처 → 기본 대표번호 순.
+//   어느 번호든 Solapi 콘솔에 발신번호로 등록돼 있어야 실제로 나간다(아니면 발송큐 실패사유에 남음).
+function smsSenderNumber_(senderPhone, managerPhone) {
+  return String(senderPhone || '').trim() || String(managerPhone || '').trim() || '0333400023';
 }
 
 // ⭐ 예전에 만들어진 '발송큐' 시트에는 '실패사유' 열이 없을 수 있어, 없으면 헤더 끝에 추가해준다.
@@ -538,9 +584,10 @@ function approveContract(id, password) {
         viewLink + "\n" +
         "(다운로드 가능 기간: ~" + expireDateStr + ")\n" +
         "담당자: " + (data.managerName || "") + " " + (data.managerPhone || "");
-      sendSolapiMessage(data.empPhone, data.managerPhone || '0333400023', smsBody);
+      sendSolapiMessage(data.empPhone, smsSenderNumber_(data.senderPhone, data.managerPhone), smsBody);
     } else if (data.workerContactEmail) {
-      MailApp.sendEmail({
+      sendEmail_({
+        senderEmail: data.senderEmail, name: data.companyName + ' 인사담당자', replyTo: data.managerEmail,
         to: data.workerContactEmail,
         subject: "[계약완료] " + data.companyName + " 근로계약서 체결 완료 및 다운로드 안내",
         body: "안녕하세요. " + data.empName + "님.\n\n" +
@@ -685,7 +732,7 @@ function getCompanySettings() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   // ⭐ 시트가 없으면 기존에 코드에 하드코딩돼 있던 값 그대로 최초 1회 생성해준다.
   var sheet = getOrCreateSheet_(ss, '회사설정', function (s) {
-    s.appendRow(['법인명', '주소', '전화번호', '대표자', '담당자명', '담당자연락처', '담당자이메일']);
+    s.appendRow(['법인명', '주소', '전화번호', '대표자', '담당자명', '담당자연락처', '담당자이메일', '발신이메일', '발신번호']);
     var seedCompanies = [
       ['(주)케이프라이드', '강원도 횡성군 우천면 우천제2농공단지로 65-50', 'T. 033-644-4467 F.033-644-1944', '김도영', '송문주', '033-340-0023', 'kpride@example.com'],
       ['㈜케이펙', '강원도 강릉시 정원로 54, 8층(교동, 주니어타운)', 'T. 033-644-4467 F.033-644-1944', '김도영', '하주연', '033-340-0012', 'kpride@example.com'],
@@ -695,6 +742,13 @@ function getCompanySettings() {
     ];
     seedCompanies.forEach(function (row) { s.appendRow(row); });
   });
+  // ⭐ 8번째 '발신이메일'·9번째 '발신번호' 열 — 법인별로 이 주소/번호에서 메일·문자를 보낸다
+  //   (비워두면 메일은 웹앱 배포 계정, 문자는 담당자연락처). 예전에 만들어진 회사설정
+  //   시트에는 이 열이 없을 수 있어 헤더만 붙여준다.
+  if (sheet.getLastColumn() < 9) withLock(function () {
+    ensureHeaderColumn_(sheet, '발신이메일');
+    ensureHeaderColumn_(sheet, '발신번호');
+  });
 
   var data = sheet.getDataRange().getValues();
   var list = [];
@@ -703,11 +757,20 @@ function getCompanySettings() {
     if (!r[0]) continue;
     list.push({
       name: r[0], address: r[1], phone: r[2], rep: r[3],
-      managerName: r[4], managerPhone: r[5], managerEmail: r[6]
+      managerName: r[4], managerPhone: r[5], managerEmail: r[6], senderEmail: r[7] || '', senderPhone: r[8] ? String(r[8]) : ''
     });
   }
   return list;
 }
+
+function findCompanySetting_(name) {
+  var list = getCompanySettings();
+  for (var i = 0; i < list.length; i++) {
+    if (String(list[i].name) === String(name)) return list[i];
+  }
+  return null;
+}
+
 
 // ⭐ 설정 탭에서 회사를 추가/수정할 때 쓴다. originalName이 있으면(기존 회사 수정, 법인명 자체를
 //   바꾸는 경우 포함) 그 이름의 행을 찾아 전체 필드를 덮어쓰고, 없으면(신규 추가) 새 행을 더한다.
@@ -718,7 +781,8 @@ function upsertCompany(company, originalName) {
 
   var row = [
     company.name || '', company.address || '', company.phone || '', company.rep || '',
-    company.managerName || '', company.managerPhone || '', company.managerEmail || ''
+    company.managerName || '', company.managerPhone || '', company.managerEmail || '',
+    String(company.senderEmail || '').trim(), String(company.senderPhone || '').trim()
   ];
 
   return withLock(function () {
@@ -1051,4 +1115,20 @@ function migrateListSheet_(ss) {
   sheet.clear();
   sheet.getRange(1, 1, newRows.length, newRows[0].length).setValues(newRows);
   return (newRows.length - 1) + '행 변환';
+}
+
+// ======================================================================
+// ⭐ 권한 승인용 — 배포 계정으로 Apps Script 편집기에서 이 함수를 한 번 실행하면, 이 프로젝트가 쓰는
+//   권한(스프레드시트, 메일/Gmail, 외부 요청(Solapi), Drive, 트리거)을 한꺼번에 승인하는 창이 뜬다.
+//   "UrlFetchApp.fetch을(를) 호출할 수 있는 권한이 없습니다" 같은 오류가 나면 이 함수를 실행해
+//   승인한 뒤, 웹앱을 [배포 관리 → 수정 → 새 버전]으로 다시 배포한다. 실제로 메일/문자를 보내지는 않는다.
+// ======================================================================
+function authorizeServices() {
+  SpreadsheetApp.getActiveSpreadsheet().getName();
+  MailApp.getRemainingDailyQuota();
+  GmailApp.getAliases();
+  DriveApp.getRootFolder().getName();
+  ScriptApp.getProjectTriggers();
+  UrlFetchApp.fetch('https://api.solapi.com', { muteHttpExceptions: true });
+  Logger.log('권한 승인 완료: ' + Session.getEffectiveUser().getEmail());
 }
