@@ -353,11 +353,7 @@ function smsSenderNumber_(senderPhone, managerPhone) {
 
 // ⭐ 예전에 만들어진 '발송큐' 시트에는 '실패사유' 열이 없을 수 있어, 없으면 헤더 끝에 추가해준다.
 function ensureQueueFailReasonColumn(sheet) {
-  var lastCol = sheet.getLastColumn();
-  var header = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
-  if (header.indexOf('실패사유') === -1) {
-    sheet.getRange(1, lastCol + 1).setValue('실패사유');
-  }
+  ensureHeaderColumn_(sheet, '실패사유');
 }
 
 // ⭐ processSendQueue용 1회성 트리거가 이미 예약돼 있으면 중복 예약하지 않는다
@@ -478,22 +474,26 @@ function loadSignedDataForAdmin(id, password) {
   return loadSignedData(id);
 }
 
-// 3-5. saveContractData(data)
+// 3-5. saveContractData(data, password)
 // ⭐ 근로자가 바꿀 수 있는 값만 받아들인다. 예전에는 화면에서 넘어온 data 전체를 그대로 저장해서,
 //   근로자가 브라우저 개발자도구로 근무조건(근로시간·수습급여·계약기간 등)을 고친 채 제출해도 그대로
 //   승인대기에 쌓였다. 이제 관리자가 발송한 원본(계약대기의 JSON)을 기준으로 삼고 아래 필드만
 //   근로자 입력으로 덮어쓴다.
 var WORKER_EDITABLE_FIELDS = ['empName', 'empPhone', 'empRegNumber', 'empAddress', 'sign1', 'sign2', 'sign3', 'sign4'];
 
-function saveContractData(data) {
+// ⭐ approveContract와 같은 이유로 막는다 — saveContractData도 google.script.run으로 누구나
+//   직접 호출 가능해서, 본인인증(verifyIdentity)은 화면 쪽 게이트일 뿐 이 함수 자체는 계약서 ID만
+//   알면 인증 없이도 그대로 받아줬다. 이제 본인인증 비밀번호를 같이 받아 여기서 다시 확인한다.
+function saveContractData(data, password) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var uniqueId = data && data.contractId;
+  if (!uniqueId) throw new Error('계약서 ID가 없습니다.');
+  if (!verifyIdentity(uniqueId, password)) return 'WRONG_PASSWORD';
+
   // ⭐ 승인대기 시트 목록
   var targetSheet = getOrCreateSheet_(ss, '승인대기', function (s) {
     s.appendRow(['ID', '법인', '성명', '전화번호', '이메일', '수신시간', '현황', '승인링크', '완료데이터(JSON)']);
   });
-
-  var uniqueId = data && data.contractId;
-  if (!uniqueId) throw new Error('계약서 ID가 없습니다.');
   // ⭐ mode=review(관리자 승인 전용) — mode=view는 완료된 계약서를 보는 용도(근로자 다운로드
   //   링크, "계약목록"의 문서링크)라 그쪽은 비밀번호를 요구하면 근로자가 막힌다. 아직 승인 전인
   //   이 링크만 mode=review로 발급해서 비밀번호 확인 없이는 데이터 자체가 안 내려가게 한다.
@@ -753,22 +753,27 @@ function getCompanySettings() {
     ];
     seedCompanies.forEach(function (row) { s.appendRow(row); });
   });
-  // ⭐ 8번째 '발신이메일'·9번째 '발신번호' 열 — 법인별로 이 주소/번호에서 메일·문자를 보낸다
-  //   (비워두면 메일은 웹앱 배포 계정, 문자는 담당자연락처). 예전에 만들어진 회사설정
-  //   시트에는 이 열이 없을 수 있어 헤더만 붙여준다.
-  if (sheet.getLastColumn() < 9) withLock(function () {
+  // ⭐ '발신이메일'·'발신번호' 열 — 법인별로 이 주소/번호에서 메일·문자를 보낸다(비워두면
+  //   메일은 웹앱 배포 계정, 문자는 담당자연락처). 예전에 만들어진 회사설정 시트에는 이 열이
+  //   없을 수 있어 헤더만 붙여준다. 끝자리가 아니라 이름으로 찾으므로(아래 headerColumnMap_)
+  //   시트에 다른 열이 이미 추가돼 있어도 엉뚱한 칸을 읽거나 덮어쓰지 않는다.
+  var header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  if (header.indexOf('발신이메일') === -1 || header.indexOf('발신번호') === -1) withLock(function () {
     ensureHeaderColumn_(sheet, '발신이메일');
     ensureHeaderColumn_(sheet, '발신번호');
   });
+  header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var col = headerColumnMap_(header);
 
   var data = sheet.getDataRange().getValues();
   var list = [];
   for (var i = 1; i < data.length; i++) {
     var r = data[i];
-    if (!r[0]) continue;
+    if (!r[col['법인명']]) continue;
     list.push({
-      name: r[0], address: r[1], phone: r[2], rep: r[3],
-      managerName: r[4], managerPhone: r[5], managerEmail: r[6], senderEmail: r[7] || '', senderPhone: r[8] ? String(r[8]) : ''
+      name: r[col['법인명']], address: r[col['주소']], phone: r[col['전화번호']], rep: r[col['대표자']],
+      managerName: r[col['담당자명']], managerPhone: r[col['담당자연락처']], managerEmail: r[col['담당자이메일']],
+      senderEmail: r[col['발신이메일']] || '', senderPhone: r[col['발신번호']] ? String(r[col['발신번호']]) : ''
     });
   }
   return list;
@@ -789,18 +794,23 @@ function upsertCompany(company, originalName) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName('회사설정');
   if (!sheet) { getCompanySettings(); sheet = ss.getSheetByName('회사설정'); }
+  // ⭐ getCompanySettings()를 거치면 '발신이메일'/'발신번호' 헤더가 없을 때 붙여준다 — 이 함수가
+  //   먼저 불려도(시트가 이미 있는 상태) 헤더가 모자라지 않도록 항상 한 번 거친다.
+  getCompanySettings();
 
-  var row = [
-    company.name || '', company.address || '', company.phone || '', company.rep || '',
-    company.managerName || '', company.managerPhone || '', company.managerEmail || '',
-    String(company.senderEmail || '').trim(), String(company.senderPhone || '').trim()
-  ];
+  var header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var col = headerColumnMap_(header);
+  var row = rowFromHeader_(header, {
+    '법인명': company.name || '', '주소': company.address || '', '전화번호': company.phone || '', '대표자': company.rep || '',
+    '담당자명': company.managerName || '', '담당자연락처': company.managerPhone || '', '담당자이메일': company.managerEmail || '',
+    '발신이메일': String(company.senderEmail || '').trim(), '발신번호': String(company.senderPhone || '').trim()
+  });
 
   return withLock(function () {
     if (originalName) {
       var data = sheet.getDataRange().getValues();
       for (var i = 1; i < data.length; i++) {
-        if (String(data[i][0]) === String(originalName)) {
+        if (String(data[i][col['법인명']]) === String(originalName)) {
           sheet.getRange(i + 1, 1, 1, row.length).setValues([row]);
           return 'OK';
         }

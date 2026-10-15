@@ -1141,16 +1141,22 @@
             if (data === "ALREADY_COMPLETED") {
               // ⭐ 처음 받은 서명 링크를 계약 완료 후에 다시 열어도, 빈 계약서가 아니라 완료된 계약서
               //   (mode=view와 같은 화면)를 보여준다 — 근로자가 완료 안내 대신 처음 링크를 다시 누르는 경우.
+              //   바깥 타이머는 이미 clearTimeout됐으니, 이 안쪽 호출도 느릴 때 "처리중..."에만
+              //   계속 멈춰 보이지 않도록 똑같이 8초 뒤 slowNotice를 띄우는 타이머를 새로 건다.
               setLoading(true);
+              const innerTimeoutId = setTimeout(() => setSlowNotice(true), 8000);
               google.script.run.withSuccessHandler(done => {
-                setLoading(false);
+                clearTimeout(innerTimeoutId); setLoading(false);
                 if (!done) { setIsInvalidLink(true); return; }
                 setIsManagerView(true);
                 setFormData(done);
                 setSignatures({ sign1: done.sign1, sign2: done.sign2, sign3: done.sign3, sign4: done.sign4 });
                 setContractStatus('COMPLETED');
                 setStep(3);
-              }).withFailureHandler(err => { setLoading(false); console.error('계약서 로드 실패:', err); setIsInvalidLink(true); }).loadSignedData(id);
+              }).withFailureHandler(err => {
+                clearTimeout(innerTimeoutId); setLoading(false);
+                console.error('계약서 로드 실패:', err); setIsInvalidLink(true);
+              }).loadSignedData(id);
               return;
             }
             if (data === "ALREADY_SUBMITTED") {
@@ -1430,12 +1436,15 @@
     
     if(!confirm("서명을 제출하시겠습니까? 담당자 승인 후 계약이 최종 완료됩니다.")) return;
     setLoading(true);
-    google.script.run.withSuccessHandler(() => {
-      setLoading(false); 
-      setSignatures(finalSignatures); 
+    google.script.run.withSuccessHandler(result => {
+      setLoading(false);
+      if (result === 'WRONG_PASSWORD') {
+        return alert("본인인증이 확인되지 않아 제출하지 못했습니다. 페이지를 새로고침해 처음부터 다시 진행해 주세요.");
+      }
+      setSignatures(finalSignatures);
       setContractStatus('SIGNED_BY_WORKER');
-      setStep(3); 
-    }).withFailureHandler(handleServerError).saveContractData({ ...formData, ...finalSignatures, contractId: urlId });
+      setStep(3);
+    }).withFailureHandler(handleServerError).saveContractData({ ...formData, ...finalSignatures, contractId: urlId }, verificationInput);
   };
 
   // 4-4. 주요 헬퍼 함수 (Index.html)
