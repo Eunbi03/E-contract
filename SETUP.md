@@ -8,7 +8,7 @@
 ## 1. (예전) `Seals.html` 직접 include 방식 — 더 이상 안 씀
 
 예전엔 `Seals.html`을 `Index.html`에 직접 포함(include)해서 쓰려 했는데, 회사명 표기가
-서로 달라 직인 이미지가 애초에 매칭되지 않았고(`㈜보담` vs `보담`, `㈜케이펙`은 아예 없음)
+서로 달라 직인 이미지가 애초에 매칭되지 않았고(`(주)보담` vs `보담`, `(주)케이펙`은 아예 없음)
 실제로는 `Index.html`에 포함되지도 않아서 지금까지 완료 계약서에 직인이 찍힌 적이 없었을
 가능성이 높습니다. 지금은 **같은 파일명(`Seals.html`)을 다른 방식으로 재사용**합니다 —
 `Index.html`에 include하는 게 아니라, `Code.gs`가 서버에서 그 파일 내용을 읽어 직인
@@ -46,7 +46,7 @@ Drive 폴더 매칭 방식은 폐기했습니다(Drive에 폴더/파일이 없�
        <script>
          const sealImages = {
            '(주)케이프라이드': 'data:image/png;base64,iVBORw0KG...',
-           '㈜보담': 'data:image/png;base64,iVBORw0KG...'
+           '(주)보담': 'data:image/png;base64,iVBORw0KG...'
          };
        </script>
      </head>
