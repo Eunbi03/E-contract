@@ -6,13 +6,22 @@ function doGet(e) {
   template.contractId = (e && e.parameter && e.parameter.id) ? e.parameter.id : "";
   template.viewMode = (e && e.parameter && e.parameter.mode) ? e.parameter.mode : "";
   return template.evaluate()
-    .setTitle('전자 근로 계약서')
+    .setTitle('전자 임금 계약서')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 // ※ XFrameOptionsMode를 ALLOWALL → DEFAULT로 변경했습니다. 주민등록번호 등 민감정보를 입력받는 화면이라
 //   다른 사이트가 iframe으로 몰래 감싸 클릭재킹하는 걸 막기 위함입니다. 이 앱을 의도적으로 다른 페이지에
 //   iframe으로 삽입해 쓰고 있었다면 ALLOWALL로 되돌려야 합니다.
+
+// ⭐ 근로자/승인/완료 링크에 쓰는 웹앱 주소. ScriptApp.getService().getUrl()은 배포가 여러 개
+//   있으면(예: 예전 근로계약서·임금계약서 프로젝트를 복사해 쓰는 경우, 테스트 배포) 지금 쓰는 배포가
+//   아닌 다른 배포의 주소를 돌려줄 때가 있다. 그 배포는 예전 코드라 새 시트 구조에서 계약을 못 찾아
+//   "유효하지 않은 링크"가 된다. 스크립트 속성 WEBAPP_URL에 실제로 쓰는 /exec 주소를 넣어두면 그 주소를 쓴다.
+function webAppUrl_() {
+  var fixed = PropertiesService.getScriptProperties().getProperty('WEBAPP_URL');
+  return fixed ? String(fixed).trim().split('?')[0] : ScriptApp.getService().getUrl();
+}
 
 // ⭐ 동시 접근 시 시트 행이 꼬이지 않도록 잠그고 실행하는 헬퍼
 function withLock(fn) {
@@ -116,19 +125,33 @@ var SEND_QUOTA_RETRY_MS = 60 * 60 * 1000;     // 일일 메일 한도 초과 시
 // 3-2. sendBatchContracts(commonData, workerList)
 function sendBatchContracts(commonData, workerList) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // ⭐ 근로자마다 입사년도·근로유형·월지급액이 다르다(연봉갱신 일괄 발송). 시트에 한 줄이라도
+  //   쓰기 전에 전원의 임금을 먼저 확정해서, 한 명이라도 잘못돼 있으면 아무것도 발송하지 않는다.
+  var workerWages = workerList.map(function (worker, idx) {
+    return resolveWorkerWage_(worker, idx);
+  });
+
+  // ⭐ 법인별 발신 이메일은 화면 값이 아니라 회사설정 시트에서 직접 읽는다.
+  var company = findCompanySetting_(commonData.companyName);
+  commonData.senderEmail = company ? company.senderEmail : '';
+  // ⭐ 법인별 문자 발신번호(Solapi에 등록된 번호) — 비워두면 예전처럼 담당자연락처로 보낸다.
+  commonData.senderPhone = company ? company.senderPhone : '';
   var draftSheet = getOrCreateSheet_(ss, '계약대기', function (s) {
     s.appendRow(['ID', '법인', '성명', '전화번호', '이메일', '발송시간', '데이터']);
   });
 
   var queueSheet = getOrCreateSheet_(ss, '발송큐', function (s) {
-    s.appendRow(['ID', '성명', '이메일', '전화번호', '링크', '모드', '법인명', '담당자명', '담당자연락처', '담당자이메일', '상태', '생성시간', '실패사유']);
+    s.appendRow(['ID', '성명', '이메일', '전화번호', '링크', '모드', '법인명', '담당자명', '담당자연락처', '담당자이메일', '발신이메일', '발신번호', '상태', '생성시간', '실패사유']);
   });
   ensureQueueFailReasonColumn(queueSheet);
+  ensureHeaderColumn_(queueSheet, '발신이메일');
+  ensureHeaderColumn_(queueSheet, '발신번호');
   // ⭐ '발송큐' 행은 이름(헤더)으로 쓴다 — 나중에 열 순서를 바꾸거나 열을 더 추가해도
   //   이름만 같으면 rowFromHeader_가 올바른 칸에 그대로 써준다.
   var queueHeader = queueSheet.getRange(1, 1, 1, queueSheet.getLastColumn()).getValues()[0];
 
-  var urlBase = ScriptApp.getService().getUrl();
+  var urlBase = webAppUrl_();
   var nowStr = new Date().toLocaleString();
 
   var draftRows = [];
@@ -150,6 +173,11 @@ function sendBatchContracts(commonData, workerList) {
     individualData.workerContactEmail = worker.email;
     individualData.status = 'DRAFT';
     individualData.sentAt = nowStr;
+    individualData.joinYear = String(worker.joinYear || '');
+    individualData.wageType = worker.wageType || '';
+    var ww = workerWages[i];
+    for (var wk in ww.wage) individualData[wk] = ww.wage[wk];
+    individualData.wageSource = ww.source; // 'table' | 'manual'
 
     // ⭐ 추측 불가능한 ID 발급 (기존 "법인코드-이름-순번-날짜" 방식은 URL을 쉽게 유추/전수조사할 수 있어 변경)
     var uniqueId = Utilities.getUuid();
@@ -160,7 +188,7 @@ function sendBatchContracts(commonData, workerList) {
       'ID': uniqueId, '성명': worker.name, '이메일': worker.email || '', '전화번호': worker.password || '',
       '링크': link, '모드': workerMode, '법인명': commonData.companyName,
       '담당자명': commonData.managerName || '', '담당자연락처': commonData.managerPhone || '', '담당자이메일': commonData.managerEmail || '',
-      '상태': 'PENDING', '생성시간': nowStr
+      '발신이메일': commonData.senderEmail || '', '발신번호': commonData.senderPhone || '', '상태': 'PENDING', '생성시간': nowStr
     }));
   }
 
@@ -194,6 +222,77 @@ function sendBatchContracts(commonData, workerList) {
   }
 
   return { totalCount: workerList.length, sentNow: sentNow, failNow: failNow, queuedRemaining: queuedRemaining };
+}
+
+// ⭐ 근로자 한 명의 임금 확정.
+//   - 임금테이블(기본): 화면에서 넘어온 금액을 그대로 믿지 않고 근로유형·월지급액으로 시트를
+//     서버에서 다시 조회해 덮어쓴다(화면 조회가 늦게 도착한 경우 등 방지).
+//   - 직접 입력(manualWage): 임금테이블에 없는 금액. 화면 값을 쓰되 서버에서 한 번 더 검증한다.
+var WAGE_FIELDS = ['annualTotal', 'monthlyTotal', 'hourlyWage', 'baseWage', 'overtimeWage', 'nightWage', 'baseHours', 'overtimeHours', 'nightHours'];
+
+function resolveWorkerWage_(worker, idx) {
+  var who = (idx + 1) + '번째 근로자(' + (worker.name || '') + ')';
+  if (!/^\d{4}$/.test(String(worker.joinYear || ''))) {
+    throw new Error(who + '의 입사년도를 4자리 숫자로 입력해 주세요.');
+  }
+  if (worker.manualWage) {
+    var w = worker.wage || {};
+    var wage = {};
+    WAGE_FIELDS.forEach(function (f) {
+      var n = toNumber_(w[f]);
+      if (n < 0) throw new Error(who + '의 임금 항목에 음수가 있습니다.');
+      wage[f] = n;
+    });
+    if (!wage.monthlyTotal || !wage.annualTotal || !wage.hourlyWage) {
+      throw new Error(who + '의 월지급액·연봉·시급을 모두 입력해 주세요.');
+    }
+    if (wage.baseWage + wage.overtimeWage + wage.nightWage !== wage.monthlyTotal) {
+      throw new Error(who + '의 기본급+연장수당+야간수당 합계가 월지급액과 다릅니다.');
+    }
+    return { wage: wage, source: 'manual' };
+  }
+  var found = getWageDataFromSheet(worker.wageType, worker.monthlyTotal);
+  if (!found) {
+    throw new Error(who + ': 임금테이블 "' + worker.wageType + '" 시트에서 월지급액 ' + worker.monthlyTotal + '원을 찾을 수 없습니다.');
+  }
+  return { wage: found, source: 'table' };
+}
+
+// ⭐ 헤더에 colName 열이 없으면 끝에 추가한다(예전에 만들어진 시트에 새 열을 붙일 때).
+function ensureHeaderColumn_(sheet, colName) {
+  var lastCol = sheet.getLastColumn();
+  var header = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+  if (header.indexOf(colName) === -1) sheet.getRange(1, lastCol + 1).setValue(colName);
+}
+
+// ⭐ 이메일 발송 공용 — senderEmail(법인별 발신 주소)이 있으면 GmailApp으로 그 주소에서 보내고,
+//   없으면 예전처럼 MailApp(스크립트 소유자 계정)으로 보낸다.
+//   GmailApp의 from은 스크립트 소유자 Gmail에 "다른 주소에서 메일 보내기"(별칭)로 등록·인증된
+//   주소만 쓸 수 있다. 등록 안 된 주소면 Gmail이 내는 애매한 오류 대신 원인을 바로 알려준다.
+function sendEmail_(opts) {
+  var sender = String(opts.senderEmail || '').trim();
+  if (!sender) {
+    var mail = { to: opts.to, subject: opts.subject, body: opts.body };
+    if (opts.replyTo) mail.replyTo = opts.replyTo;
+    if (opts.name) mail.name = opts.name;
+    MailApp.sendEmail(mail);
+    return;
+  }
+  var owner = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
+  var aliases = GmailApp.getAliases().map(function (a) { return String(a).toLowerCase(); });
+  if (sender.toLowerCase() !== owner && aliases.indexOf(sender.toLowerCase()) === -1) {
+    throw new Error('발신이메일 ' + sender + '이(가) 스크립트 소유자(' + owner + ') Gmail의 "다른 주소에서 메일 보내기"에 등록되어 있지 않습니다.');
+  }
+  var options = { from: sender };
+  if (opts.replyTo) options.replyTo = opts.replyTo;
+  if (opts.name) options.name = opts.name;
+  GmailApp.sendEmail(opts.to, opts.subject, opts.body, options);
+}
+
+// ⭐ 문자 발신번호 결정 — 법인 발신번호 → 담당자연락처 → 기본 대표번호 순.
+//   어느 번호든 Solapi 콘솔에 발신번호로 등록돼 있어야 실제로 나간다(아니면 발송큐 실패사유에 남음).
+function smsSenderNumber_(senderPhone, managerPhone) {
+  return String(senderPhone || '').trim() || String(managerPhone || '').trim() || '0333400023';
 }
 
 // ⭐ "발송큐" 시트에서 대기 중(PENDING)인 항목을 최대 SEND_CHUNK_SIZE개 꺼내 실제로 발송하고,
@@ -253,7 +352,9 @@ function processSendQueue() {
       var row = claimedRows[k].row;
       var rcol = claimedRows[k].col;
       var name = row[rcol['성명']], email = row[rcol['이메일']], phone = row[rcol['전화번호']], link = row[rcol['링크']], rowMode = row[rcol['모드']],
-          companyName = row[rcol['법인명']], managerName = row[rcol['담당자명']], managerPhone = row[rcol['담당자연락처']], managerEmail = row[rcol['담당자이메일']];
+          companyName = row[rcol['법인명']], managerName = row[rcol['담당자명']], managerPhone = row[rcol['담당자연락처']], managerEmail = row[rcol['담당자이메일']],
+          senderEmail = rcol['발신이메일'] !== undefined ? row[rcol['발신이메일']] : '',
+          senderPhone = rcol['발신번호'] !== undefined ? String(row[rcol['발신번호']] || '') : '';
 
       var msgVars = {
         workerName: name, companyName: companyName, link: link,
@@ -266,14 +367,12 @@ function processSendQueue() {
       var failReason = '';
       try {
         if (rowMode === 'email') {
-          MailApp.sendEmail({
-            to: email,
-            replyTo: managerEmail,
-            subject: subject,
-            body: messageBody
+          sendEmail_({
+            to: email, replyTo: managerEmail, subject: subject, body: messageBody,
+            senderEmail: senderEmail, name: companyName + ' 인사담당자'
           });
         } else if (rowMode === 'sms') {
-          sendSolapiMessage(phone, managerPhone || '0333400023', messageBody);
+          sendSolapiMessage(phone, smsSenderNumber_(senderPhone, managerPhone), messageBody);
         }
         sentCount++;
       } catch (e) {
@@ -337,25 +436,26 @@ function findRowById(sheet, id, idCol) {
   return null;
 }
 
-// ⭐ 계약목록 시트는 id가 별도 열이 아니라 J열(인덱스 9) JSON 데이터 안 contractId 필드에
-//   들어있어 findRowById와는 다른 방식으로 찾아야 한다.
+// ⭐ 계약목록 시트는 id가 별도 열이 아니라 '데이터(JSON)' 열 안 contractId 필드에
+//   들어있어 findRowById와는 다른 방식으로 찾아야 한다. JSON 열 위치는 헤더 이름으로 찾는다
+//   (계약목록에 열을 추가/재배치해도 그대로 동작하도록). 헤더가 없으면 마지막 열로 본다.
 function findContractIdInList(listSheet, id) {
   if (!listSheet) return null;
   var data = listSheet.getDataRange().getValues();
   if (!data.length) return null;
   var col = headerColumnMap_(data[0]);
-  var linkCol = col['문서링크'];
   var jsonCol = col['데이터(JSON)'];
-  // ⭐ "완료된 계약서 보기"가 계약이 쌓일수록 느려지던 원인 — 예전엔 매 행 JSON(서명
-  //   이미지가 포함돼 꽤 큼)을 contractId를 찾을 때까지 전부 parse했다. "문서링크" 열에는
-  //   이미 "...&id=<contractId>&mode=view"가 평문으로 들어있으므로, 먼저 이 가벼운 문자열
-  //   비교로 후보 행을 좁히고 JSON.parse는 실제로 일치하는 그 한 행에만 수행한다.
-  //   (만에 하나 문서링크 열을 못 찾으면, 예전처럼 전체를 훑는 방식으로 안전하게 되돌아간다.)
-  var needle = linkCol != null ? ('id=' + id) : null;
+  if (jsonCol === undefined) jsonCol = data[0].length - 1;
+  // ⭐ 계약이 쌓일수록 완료 계약서 열람이 느려지던 원인 — 예전엔 contractId를 찾을 때까지 매 행의
+  //   JSON(서명 이미지가 들어 있어 큼)을 전부 해석했다. '문서링크' 열에는 "...?id=<contractId>&mode=view"가
+  //   평문으로 들어 있으므로 먼저 이 가벼운 문자열 비교로 행을 좁히고, JSON 해석은 일치하는 행에만 한다.
+  //   (문서링크 열이 없으면 예전처럼 전체를 훑는다.) — 전자근로계약서와 같은 방식.
+  var linkCol = col['문서링크'];
+  var needle = linkCol !== undefined ? ('id=' + id) : null;
   for (var i = 1; i < data.length; i++) {
     if (needle && String(data[i][linkCol]).indexOf(needle) === -1) continue;
     try {
-      var parsed = JSON.parse(data[i][jsonCol != null ? jsonCol : 9]);
+      var parsed = JSON.parse(data[i][jsonCol]);
       if (String(parsed.contractId) === String(id)) return parsed;
     } catch (e) {}
   }
@@ -433,6 +533,12 @@ function loadSignedDataForAdmin(id, password) {
 }
 
 // 3-5. saveContractData(data)
+// ⭐ 근로자가 바꿀 수 있는 값만 받아들인다. 근로계약서 버전은 화면에서 넘어온 data 전체를
+//   그대로 저장했는데, 그러면 근로자가 브라우저 개발자도구로 월지급액/연봉 같은 금액을 고친
+//   채 제출해도 그대로 승인대기에 쌓인다. 임금계약서는 금액 자체가 핵심이라, 관리자가 발송한
+//   원본(계약대기의 JSON)을 기준으로 삼고 아래 필드만 근로자 입력으로 덮어쓴다.
+var WORKER_EDITABLE_FIELDS = ['empName', 'empPhone', 'empRegNumber', 'empAddress', 'sign1', 'sign2', 'sign3'];
+
 function saveContractData(data) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   // ⭐ 승인대기 시트 목록
@@ -440,13 +546,12 @@ function saveContractData(data) {
     s.appendRow(['ID', '법인', '성명', '전화번호', '이메일', '수신시간', '현황', '승인링크', '완료데이터(JSON)']);
   });
 
-  var uniqueId = data.contractId;
-  data.status = 'SIGNED_BY_WORKER';
-  data.workerSignedAt = new Date().toLocaleString();
+  var uniqueId = data && data.contractId;
+  if (!uniqueId) throw new Error('계약서 ID가 없습니다.');
   // ⭐ mode=review(관리자 승인 전용) — mode=view는 완료된 계약서를 보는 용도(근로자 다운로드
   //   링크, "계약목록"의 문서링크)라 그쪽은 비밀번호를 요구하면 근로자가 막힌다. 아직 승인 전인
   //   이 링크만 mode=review로 발급해서 비밀번호 확인 없이는 데이터 자체가 안 내려가게 한다.
-  var viewLink = ScriptApp.getService().getUrl() + "?id=" + uniqueId + "&mode=review";
+  var viewLink = webAppUrl_() + "?id=" + uniqueId + "&mode=review";
 
   return withLock(function () {
     // ⭐ 중복 제출 방지 — 네트워크 재시도나 "최종 제출" 두 번 클릭으로 같은 id가 또 들어오면,
@@ -456,42 +561,83 @@ function saveContractData(data) {
     if (findRowById(targetSheet, uniqueId, 0) || findContractIdInList(ss.getSheetByName('계약목록'), uniqueId)) {
       return "Success";
     }
+
+    var draftRow = findRowById(ss.getSheetByName('계약대기'), uniqueId, 0);
+    if (!draftRow) throw new Error('유효하지 않은 계약서입니다.');
+    var saved = JSON.parse(draftRow[6]);
+    WORKER_EDITABLE_FIELDS.forEach(function (f) {
+      if (data[f] !== undefined) saved[f] = data[f];
+    });
+    if (!saved.empName || !saved.empRegNumber || !saved.empAddress || !saved.empPhone) {
+      throw new Error('근로자 정보(성명/연락처/주민등록번호/주소)가 모두 입력되지 않았습니다.');
+    }
+    if (!saved.sign1 || !saved.sign2 || !saved.sign3) {
+      throw new Error('서명이 모두 완료되지 않았습니다.');
+    }
+    // ⭐ 본인인증 비밀번호는 승인대기/계약목록으로 넘기지 않는다(관리자 화면, 완료 다운로드 링크로 내려가므로).
+    delete saved.contractPassword;
+    saved.contractId = uniqueId;
+    saved.status = 'SIGNED_BY_WORKER';
+    saved.workerSignedAt = new Date().toLocaleString();
+
     // ⭐ 승인대기 시트 저장 데이터 설정
     targetSheet.appendRow([
-      uniqueId, data.companyName || '', data.empName || '', data.empPhone || '', data.workerContactEmail || '',
-      new Date(), 'SIGNED_BY_WORKER', viewLink, JSON.stringify(data)
+      uniqueId, saved.companyName || '', saved.empName || '', saved.empPhone || '', saved.workerContactEmail || '',
+      new Date(), 'SIGNED_BY_WORKER', viewLink, JSON.stringify(saved)
     ]);
     deleteRowById(ss.getSheetByName('계약대기'), uniqueId, 0);
     return "Success";
   });
 }
 
-// 3-6. approveContract(data)
-function approveContract(data) {
+// 3-6. approveContract(id, password)
+// ⭐ 근로계약서 버전은 approveContract(data)가 비밀번호 확인 없이 화면이 넘긴 data를 그대로
+//   계약목록에 올렸다. google.script.run 함수는 웹앱 링크만 있으면 누구나 직접 부를 수 있어서,
+//   자기 계약서 ID를 아는 근로자가 개발자도구로 스스로 "승인"(직인 날인)할 수 있는 구멍이었다.
+//   그래서 관리자 비밀번호를 같이 받아 서버에서 확인하고, 데이터도 화면이 아니라 승인대기
+//   시트에 저장된 원본(근로자가 제출한 그대로)을 쓴다.
+function approveContract(id, password) {
+  if (!verifyAdminPassword(password)) return 'WRONG_PASSWORD';
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  data.status = 'COMPLETED';
-  data.approvedAt = new Date().toLocaleString();
   // ⭐ 계약목록 시트 목록 — 주민등록번호는 별도 열로 두지 않는다(민감정보라 한눈에 보이는
   //   목록에는 안 올리는 편이 안전). 필요하면 마지막 "데이터(JSON)" 열 안에 그대로 들어있다.
   var listSheet = getOrCreateSheet_(ss, '계약목록', function (s) {
-    s.appendRow(['법인', '성명', '전화번호', '주소', '입사일', '발송일시', '제출일시', '완료일시', '문서링크', '데이터(JSON)']);
+    s.appendRow(['법인', '구분', '성명', '전화번호', '입사년도', '근로유형', '임금계약기간', '월지급액', '연봉', '발송일시', '제출일시', '완료일시', '문서링크', '데이터(JSON)']);
   });
+  // ⭐ 계약목록은 열을 헤더 이름으로 찾아 쓴다. '데이터(JSON)' 헤더가 없으면(이름을 바꿨거나 지운 경우)
+  //   계약 데이터가 어디에도 저장되지 않은 채 승인대기에서만 지워져 완료 링크가 영영 열리지 않으므로,
+  //   없으면 맨 끝에 그 열을 만들어서라도 반드시 저장한다.
+  if (listSheet.getLastColumn() === 0 || listSheet.getRange(1, 1, 1, listSheet.getLastColumn()).getValues()[0].indexOf('데이터(JSON)') === -1) {
+    withLock(function () { ensureHeaderColumn_(listSheet, '데이터(JSON)'); });
+  }
+  var listHeader = listSheet.getRange(1, 1, 1, listSheet.getLastColumn()).getValues()[0];
 
-  var viewLink = ScriptApp.getService().getUrl() + "?id=" + data.contractId + "&mode=view";
+  var viewLink = webAppUrl_() + "?id=" + id + "&mode=view";
+  var data = null;
 
   // ⭐ 중복 승인 방지 — 이미 계약목록에 들어가 있으면(=이미 승인 처리됨) 또 행을 쌓거나
   //   완료 안내를 중복 발송하지 않는다. 승인대기에서 이미 사라졌다면(=방금 다른 요청이 먼저
   //   승인 완료) 마찬가지로 중복 호출로 보고 건너뛴다.
   var alreadyApproved = withLock(function () {
-    if (findContractIdInList(listSheet, data.contractId)) return true;
-    if (!findRowById(ss.getSheetByName('승인대기'), data.contractId, 0)) return true;
+    if (findContractIdInList(listSheet, id)) return true;
+    var pendingRow = findRowById(ss.getSheetByName('승인대기'), id, 0);
+    if (!pendingRow) return true;
 
-    // ⭐ 계약목록 시트 저장 데이터 설정
-    listSheet.appendRow([
-      data.companyName, data.empName, data.empPhone, data.empAddress, data.joinDate,
-      data.sentAt || "", data.workerSignedAt || "", data.approvedAt, viewLink, JSON.stringify(data)
-    ]);
-    deleteRowById(ss.getSheetByName('승인대기'), data.contractId, 0);
+    data = JSON.parse(pendingRow[8]);
+    data.contractId = id;
+    data.status = 'COMPLETED';
+    data.approvedAt = new Date().toLocaleString();
+
+    // ⭐ 계약목록 시트 저장 데이터 설정 — '발송큐'처럼 헤더 이름 기준으로 쓴다.
+    listSheet.appendRow(rowFromHeader_(listHeader, {
+      '법인': data.companyName, '구분': CONTRACT_KIND_LABELS[data.contractKind] || '', '성명': data.empName,
+      '전화번호': data.empPhone, '입사년도': data.joinYear, '근로유형': data.wageType,
+      '임금계약기간': (data.contractStart || '') + ' ~ ' + (data.contractEnd || ''),
+      '월지급액': Number(data.monthlyTotal) || '', '연봉': Number(data.annualTotal) || '',
+      '발송일시': data.sentAt || '', '제출일시': data.workerSignedAt || '', '완료일시': data.approvedAt,
+      '문서링크': viewLink, '데이터(JSON)': JSON.stringify(data)
+    }));
+    deleteRowById(ss.getSheetByName('승인대기'), id, 0);
     return false;
   });
   if (alreadyApproved) return "Approved";
@@ -511,18 +657,19 @@ function approveContract(data) {
   var completionMode = data.sendMode || (data.workerContactEmail ? 'email' : 'sms');
   try {
     if (completionMode === 'sms') {
-      var smsBody = data.companyName + " 근로계약 체결이 완료되었습니다.\n" +
+      var smsBody = data.companyName + " 임금계약 체결이 완료되었습니다.\n" +
         "아래 링크에서 [인쇄 및 PDF 저장]으로 최종 계약서를 받아 보관해 주세요.\n" +
         viewLink + "\n" +
         "(다운로드 가능 기간: ~" + expireDateStr + ")\n" +
         "담당자: " + (data.managerName || "") + " " + (data.managerPhone || "");
-      sendSolapiMessage(data.empPhone, data.managerPhone || '0333400023', smsBody);
+      sendSolapiMessage(data.empPhone, smsSenderNumber_(data.senderPhone, data.managerPhone), smsBody);
     } else if (data.workerContactEmail) {
-      MailApp.sendEmail({
+      sendEmail_({
+        senderEmail: data.senderEmail, name: data.companyName + ' 인사담당자', replyTo: data.managerEmail,
         to: data.workerContactEmail,
-        subject: "[계약완료] " + data.companyName + " 근로계약서 체결 완료 및 다운로드 안내",
+        subject: "[계약완료] " + data.companyName + " 임금계약서 체결 완료 및 다운로드 안내",
         body: "안녕하세요. " + data.empName + "님.\n\n" +
-          "전자근로계약이 최종 승인되어 체결이 완료되었습니다.\n" +
+          "전자임금계약이 최종 승인되어 체결이 완료되었습니다.\n" +
           "아래 링크로 접속하신 후, 화면의 [인쇄 및 PDF 저장] 버튼을 눌러 최종 계약서를 다운로드하여 보관해 주시기 바랍니다.\n\n" +
           "▶ 최종 계약서 확인 및 PDF 다운로드 링크:" + viewLink + "\n" +
           "▶ 다운로드 가능 기간: ~ " + expireDateStr + "\n\n" +
@@ -536,6 +683,10 @@ function approveContract(data) {
   return "Approved";
 }
 
+// ⭐ 계약 구분 — 신규입사자/기존 직원 연봉갱신 둘 다 같은 계약서 양식을 쓰고, 계약목록에서
+//   구분해서 볼 수 있도록 '구분' 열에만 표시한다.
+var CONTRACT_KIND_LABELS = { 'new': '신규입사', 'renewal': '연봉갱신' };
+
 // ⭐ 관리자가 최종 승인한 직후, 화면에 렌더링된 계약서(직인 포함) 그대로를 넘겨받아
 //   담당자 컴퓨터로 동기화되는 Drive 폴더에 자동 보관한다. Index.html의 #print-area outerHTML을
 //   그대로 저장하므로 계약서 문구를 서버 코드에 다시 옮겨 적을 필요가 없고(오타/누락 위험 없음),
@@ -546,17 +697,17 @@ function approveContract(data) {
 //   그래서 withLock으로 감싸지 않는다.
 function archiveContractHtml(id, html) {
   var folder = getOrCreateArchiveFolder();
-  var safeHtml = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>근로계약서 ' + id + '</title></head><body>' + html + '</body></html>';
-  var htmlBlob = Utilities.newBlob(safeHtml, 'text/html', '근로계약서_' + id + '.html');
+  var safeHtml = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>임금계약서 ' + id + '</title></head><body>' + html + '</body></html>';
+  var htmlBlob = Utilities.newBlob(safeHtml, 'text/html', '임금계약서_' + id + '.html');
   folder.createFile(htmlBlob);
 
   // PDF 변환은 Apps Script 고급 서비스인 Drive API가 있어야 동작한다(스크립트 편집기 좌측 서비스(+)에서
   // "Drive API" 추가). 추가돼 있지 않으면 이 블록만 조용히 건너뛰고 위의 HTML 백업은 그대로 남는다.
   try {
-    var resource = { title: '근로계약서_' + id, mimeType: MimeType.GOOGLE_DOCS };
+    var resource = { title: '임금계약서_' + id, mimeType: MimeType.GOOGLE_DOCS };
     var docFile = Drive.Files.insert(resource, htmlBlob);
     var doc = DocumentApp.openById(docFile.id);
-    var pdfBlob = doc.getAs('application/pdf').setName('근로계약서_' + id + '.pdf');
+    var pdfBlob = doc.getAs('application/pdf').setName('임금계약서_' + id + '.pdf');
     folder.createFile(pdfBlob);
     DriveApp.getFileById(docFile.id).setTrashed(true);
   } catch (e) {
@@ -566,7 +717,7 @@ function archiveContractHtml(id, html) {
 }
 
 function getOrCreateArchiveFolder() {
-  var name = '전자근로계약_완료보관함';
+  var name = '전자임금계약_완료보관함';
   var folders = DriveApp.getFoldersByName(name);
   return folders.hasNext() ? folders.next() : DriveApp.createFolder(name);
 }
@@ -582,55 +733,56 @@ function getConfig() {
     companies: getCompanySettings(),
     clauses: getClauseTemplates(),
     defaults: getDefaults(),
-    messageTemplate: getMessageTemplate()
+    messageTemplate: getMessageTemplate(),
+    wageTypes: getWageTypes()
   };
 }
 
-// ⭐ 계약서 문구 중 회사명/근무조건 같은 가변 항목이 전혀 없는 순수 고정 조항만 시트로 뺐다.
-//   (제2·6조처럼 정규직/계약직 체크박스나 근로시간 표 같은 조건부 구조가 있는 조항은 자유
-//   텍스트로 바꾸면 오히려 깨지기 쉬워서 지금처럼 코드/사이드바 입력값으로 남겨둔다.)
-//   담당자가 "조항템플릿" 시트의 본문 셀만 고치면 코드 배포 없이 바로 반영된다.
+// ⭐ 임금계약서 문구 중 표 구조(임금계약기간, 월지급액 세부내역 표, 서명란)를 뺀 순수 문구
+//   부분만 시트로 뺐다. 금액·회사명 같은 가변값은 {{monthlyTotal}}, {{companyName}} 같은
+//   자리표시자로 저장해두고, 실제 계약서를 그릴 때 계약 데이터 값으로 치환한다.
+//   담당자가 수정 탭(또는 "조항템플릿" 시트의 본문 셀)에서 고치면 코드 배포 없이 바로 반영된다.
+//   ※ Index.html의 CLAUSE_DEFAULTS와 문구가 같아야 한다(시트를 못 불러왔을 때의 폴백).
+var CLAUSE_SEED_ORDER = ['preamble', 'total', 'retirement', 'payment', 'paymentNotes', 'nature', 'consent1', 'consent2'];
+var CLAUSE_SEED_DEFAULTS = {
+  'preamble': ['머리말', '아래의 근로조건을 성실히 이행할 것을 약정하고 임금계약을 체결한다.'],
+  'total': ['임금총액(1년기준)', '1. 임금총액: 연간 {{annualTotal}}원 (월 <span style="background-color:#fef08a;font-weight:bold;padding:0 8px;">{{monthlyTotal}}원</span>) 갑근세 등을 공제하기 전 금액임<br/>2. 임금총액에는 기본급, 연장수당, 야간수당 등이 포함되어 있다.'],
+  'retirement': ['퇴직금', '1. 퇴직금은 계속근로년수 1년 이상인 근로자에게 퇴직시 지급하거나 퇴직연금에 가입한다.<br/>2. 1주간 소정근로시간이 15시간 미만인 경우 퇴직금 규정은 적용하지 아니한다.'],
+  'payment': ['임금총액의 월지급액', '1. 임금총액의 월지급액(월급액)은 기본급 등의 1/12한 금액을 매월 10일에 "을"에게 통장계좌로 지급한다.<br/>2. 임금총액의 월지급액의 구체적인 내역은 다음과 같다.(시급: {{hourlyWage}}원)'],
+  'paymentNotes': ['월지급액 기타사항', '3. 월지급액은 매월 1일에서 기산하여 말일에 마감한다.<br/>4. 임금총액에 포함되는 시간 외 근로시간을 초과하여 근로하는 경우 추가연장수당을 지급한다.<br/>5. 별도의 성과급 지급 기준에 의거 성과급을 지급할 수 있다.(단, 지급일에 근속중인 직원에 한한다.)<br/>6. 포괄임금제(고정연장수당 및 고정야간근로수당)로 지급함에 동의한다.<br/>7. 결근, 지각, 조퇴 등 근로하지 않은 기간은 일수 또는 시간에 비례한 금액을 공제할 수 있으며, 결근의 경우 해당 주의 주휴수당을 공제할 수 있다.<br/>8. 중도입사, 중도퇴사의 경우 월임금은 일할 산정하여 지급한다.'],
+  'nature': ['임금총액의 성격과 준수사항', '임금총액은 {{companyName}}의 규정과 상사의 지시에 따른 본인의 근로제공에 대한 모든 금전적 보상임을 확인하며 직원상호간 비밀의무를 준수한다. 만약 이를 타인에게 인지시킬 수 있는 어떠한 행위도 하지 않을 것이며, 이를 어길시에는 어떠한 처벌도 감수할 것을 서약한다.'],
+  // ⭐ 근로자 서명 단계(5·6단계)에 쓰이는 2종 동의서. "조번호" 열에 문자열 키를 그대로 쓴다.
+  'consent1': ['전자임금계약 체결 동의서', '1) 「전자문서 및 전자거래 기본법」 제4조 제1항에 따라, 본 임금계약서를 전자적 형태(URL 접속 및 전자서명)로 작성 및 체결하는 것에 동의합니다.<br/>2) 「전자서명법」 제3조 제1항 및 제2항에 따라, 본인이 등록한 전자서명이 자필 서명 또는 날인과 동일한 법적 효력을 가짐을 인정합니다.<br/>3) 「전자서명법」 제18조에 근거하여 본인 인증(휴대폰 번호 등)에 대한 관리 의무 및 보안 책임을 확인합니다.<br/>4) 「근로기준법」 제17조 제2항에 따라 임금계약서의 전자적 방법(이메일 또는 링크 등)을 통한 교부에 동의합니다.'],
+  'consent2': ['계약서 교부 확인', '근로자 본인은 위 내용을 충분히 숙지하였으며, 그 내용에 동의하며 임금계약서 사본 또는 부본을 교부받았음을 확인합니다.']
+};
+
 function getClauseTemplates() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = getOrCreateSheet_(ss, '조항템플릿', function (s) {
     s.appendRow(['조번호', '제목', '본문']);
   });
 
-  // ⭐ 변수(근무장소/담당업무)가 섞인 조항은 {{workPlace}}, {{duties}} 같은 자리표시자로
-  //   저장해두고, 실제 계약서를 그릴 때 formData 값으로 치환한다.
-  var seedDefaults = {
-    '1': ['목적', '본 근로계약서는 "갑"과 "을"이 근로계약을 체결함에 있어 임금, 근로시간 등 근로조건을 정하는 것을 목적으로 한다.'],
-    '3': ['근무장소', '"을"의 근무 장소는 {{workPlace}}(으)로 한다. 다만 "갑"은 인사명령에 의거 "을"의 근무 장소를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.'],
-    '4': ['담당업무', '"을"의 담당업무는 {{duties}}(으)로 한다. 다만, "갑"은 인사명령에 의거 "을"의 담당업무를 변경할 수 있으며 "을"은 이에 이의를 제기하지 않는다.'],
-    '5': ['임금', '(1) 임금형태 : "갑"과 "을"은 월급제로 임금계약을 체결한다. (기본급과 법정 제수당이 포함된 "포괄임금")<br/>(2) 임금내용 : 월급총액, 월급의 구성내역, 지급방법 등은 임금계약서에 의한다.<br/>(3) 사정변경 : "갑"은 계약기간 중 제반 경영여건상 처우조건이 불가피하거나, 인사상 처우조정 사유발생시에는 제반기준에 의거 임금을 조정할 수 있다.<br/>(4) 임금인상 : "갑"과 "을"은 근로계약기간이 종료되는 시점에서 업무상 필요성, "갑"의 경영사정에 의거 재계약을 체결할 시 상호 대등한 입장으로 임금인상 등을 협의할 수 있다. 다만 임금내용의 변동이 없는 경우, 또는 임금인상에 대한 합의가 성립 되지 않는 경우 이전과 동일한 금액으로 반복하여 체결하며 "을"은 이에 이의를 제기하지 않는다.<br/>(5) 임금산정일 및 지급일자 : 초일부터 말일까지 계산하여 익월 10일에 지급한다. (단 공휴일일경우에는 그 다음 영업일에 지급한다.)<br/>(6) 비밀유지 : 임금은 회사의 규정과 상사의 지시에 따른 본인의 근로제공에 대한 모든 금전적 보상임을 확인하며 직원상호간 비밀의무를 반드시 준수한다.'],
-    '7': ['휴일 및 휴가', '(1) 휴일 : 주휴일(1주간 소정근로일수 개근시 주1회), 근로자의 날, 관공서공휴일규정에 따른 공휴일과 대체공휴일<br/> ※ 업무 특성 상 특정 주에 변경되는 주휴일은 휴일변경(대체)하는 것이며, 근로자는 이에 동의한다.<br/>(2) 휴가 : 연차유급휴가는 "근로기준법"에 의한다. (1년간 80퍼센트 이상 출근한 근로자에게 15일 / 1년 미만 근로자의 경우 1개월 개근시 1일)<br/> ※ 근로자가 본인에게 발생한 연차유급휴가일수 보다 더 많은 연차휴가를 사용한 경우 이는 "사용자"가 "근로자"에게 향후 발생할 연차휴가를 선사용하도록 허용한 것이므로 "근로자"가 퇴사하는 경우 더 많이 사용한 연차휴가 일수만큼 임금을 공제할 수 있다.<br/> ※ 1주간 소정근로시간 15시간 미만인 자는 휴일 및 휴가 규정은 적용하지 아니한다. (근로자의 날 제외)'],
-    '8': ['근로계약의 종료 등', '(1) "을"이 정년에(만60세) 도달하거나 약정한 근로계약기간의 만료로 근로계약은 자동 종료된다.<br/>(2) 근로계약의 만료일이 지정된 경우 계약기간 만료시 본 계약은 자동해지 된다.<br/>(3) "갑"의 해지사유 : "갑"은 정년도래, 기간만료 이외 "갑"의 관련규정 등에서 정한 정당한 사유가 있는 경우에는 "을"의 의사에도 불구하고 근로계약을 해지할 수 있다. 다만, "갑"은 근로기준법에서 규정하고 있는 해고예고의 예외가 되는 근로자의 귀책사유 이외에는 해고예정일 30일전에 서면으로 통보해야 한다.<br/>(4) "을"의 해지사유 : "을"이 정년도래, 기간만료 이외 계약을 해지하고자 하는 경우에는 30일전에 "갑"에게 통보하여야 하고 후임자에게 업무의 인수인계를 하여야 하며, 이를 해태함으로 인하여 "갑"에게 손해가 발생하는 경우에는 이를 배상하여야 한다.'],
-    '9': ['의무', '"갑"은 "을"의 근무조건 향상을 위하여 최선을 다하여야 하며, "을"은 신의성실의 원칙에 의하여 근로를 제공하여야 한다. 특히 "을"은 "갑"이 정한 안전에 관한 제 규칙과 지시사항을 위반하여 발생한 제반사고는 "을"의 귀책사유로 한다.'],
-    '10': ['손해배상', '"을"이 계약기간 중 고의 또는 과실로 "갑"에게 손해를 입힌 때에는 이를 배상하여야 한다.'],
-    '11': ['기타 근로조건', '본 계약서를 작성함에 있어 "을"은 "갑"의 취업규칙 및 제 규정을 열람하였으며 이 계약에 정함이 없는 사항은 관계법령 및 "갑"의 취업규칙 등에 정한 바에 따르며 상기사실을 확실히 하기 위하여 본 계약서를 2통 작성하여 사용자와 근로자가 각 1통씩 보관키로 한다.'],
-    // ⭐ 3단계(이번)에서 추가 — 근로자 서명 단계(7·8·9단계)에 쓰이는 3종 동의서. "조번호"
-    //   열에 숫자 대신 consent1/2/3을 쓰지만, getClauseTemplates/saveClauseTemplate는
-    //   이 열을 숫자로 취급하지 않고 그냥 문자열 키로 다루므로 기존 로직을 그대로 재사용한다.
-    'consent1': ['전자근로계약 체결 동의서', '1) 「전자문서 및 전자거래 기본법」 제4조 제1항에 따라, 본 근로계약서를 전자적 형태(URL 접속 및 전자서명)로 작성 및 체결하는 것에 동의합니다.<br/>2) 「전자서명법」 제3조 제1항 및 제2항에 따라, 본인이 등록한 전자서명이 자필 서명 또는 날인과 동일한 법적 효력을 가짐을 인정합니다.<br/>3) 「전자서명법」 제18조에 근거하여 본인 인증(휴대폰 번호 등)에 대한 관리 의무 및 보안 책임을 확인합니다.<br/>4) 「근로기준법」 제17조 제2항에 따라 근로계약서의 전자적 방법(이메일 또는 링크 등)을 통한 교부에 동의합니다.'],
-    'consent2': ['연장/야간/휴일근로 동의서', '1) 「근로기준법」 제53조(연장근로의 제한) 제1항에 따라 사업장의 업무상황 및 근무표 등에 의하여 요구되는 연장,야간,휴일 근로에 동의합니다.<br/>2) 「근로기준법」 제70조(야간근로와 휴일근로의 제한) 제1항 - 18세 이상 여성이 오후 10시부터 오전6시까지 근로 및 휴일근로에 동의합니다.'],
-    'consent3': ['동의 및 교부확인', '1) 임금 산정방식 및 지급방법의 결정에 동의합니다.<br/>2) 퇴사 시 잔여 임금 및 퇴직금 등은 최초 도래하는 당사 임금지급일에 지급하는 것에 동의합니다.<br/>(1) 임금 지급일 : 매월 초일부터 말일까지의 임금을 익월 15일 지급<br/>(2) 퇴직연금 부담금 납입일 : 매월 초일부터 말일까지의 임금에 대한 부담금을 익월 25일 납입']
+  var missingSeeds = function () {
+    var rows = sheet.getDataRange().getValues();
+    var existing = {};
+    for (var i = 1; i < rows.length; i++) {
+      var n = String(rows[i][0]).trim();
+      if (n) existing[n] = true;
+    }
+    return CLAUSE_SEED_ORDER.filter(function (num) { return !existing[num]; });
   };
-  var order = ['1', '3', '4', '5', '7', '8', '9', '10', '11', 'consent1', 'consent2', 'consent3'];
 
-  var data = sheet.getDataRange().getValues();
-  var existingNums = {};
-  for (var i = 1; i < data.length; i++) {
-    var n = String(data[i][0]).trim();
-    if (n) existingNums[n] = true;
+  // ⭐ 모자란 조항만 이어서 채운다(관리자가 이미 고친 조항은 건드리지 않음). 두 요청이 동시에
+  //   같은 조항을 채우지 않도록 getOrCreateSheet_과 같은 "락 밖 확인 → 락 안 재확인" 패턴을 쓴다.
+  if (missingSeeds().length) {
+    withLock(function () {
+      missingSeeds().forEach(function (num) {
+        sheet.appendRow([num, CLAUSE_SEED_DEFAULTS[num][0], CLAUSE_SEED_DEFAULTS[num][1]]);
+      });
+    });
   }
 
-  // ⭐ 1단계(제1·9·10·11조만)에서 이미 만들어둔 시트라도, 이번에 추가된 조항(3·4·5·7·8)만
-  //   모자라게 이어서 채워준다. 이미 있던 조항(관리자가 고쳤을 수 있는)은 건드리지 않는다.
-  order.forEach(function (num) {
-    if (!existingNums[num]) sheet.appendRow([num, seedDefaults[num][0], seedDefaults[num][1]]);
-  });
-
-  data = sheet.getDataRange().getValues();
+  var data = sheet.getDataRange().getValues();
   var map = {};
   for (var j = 1; j < data.length; j++) {
     var num2 = String(data[j][0]).trim();
@@ -663,7 +815,7 @@ function getCompanySettings() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   // ⭐ 시트가 없으면 기존에 코드에 하드코딩돼 있던 값 그대로 최초 1회 생성해준다.
   var sheet = getOrCreateSheet_(ss, '회사설정', function (s) {
-    s.appendRow(['법인명', '주소', '전화번호', '대표자', '담당자명', '담당자연락처', '담당자이메일']);
+    s.appendRow(['법인명', '주소', '전화번호', '대표자', '담당자명', '담당자연락처', '담당자이메일', '발신이메일', '발신번호']);
     var seedCompanies = [
       ['(주)케이프라이드', '강원도 횡성군 우천면 우천제2농공단지로 65-50', 'T. 033-644-4467 F.033-644-1944', '김도영', '송문주', '033-340-0023', 'kpride@example.com'],
       ['(주)케이펙', '강원도 강릉시 정원로 54, 8층(교동, 주니어타운)', 'T. 033-644-4467 F.033-644-1944', '김도영', '하주연', '033-340-0012', 'kpride@example.com'],
@@ -673,6 +825,13 @@ function getCompanySettings() {
     ];
     seedCompanies.forEach(function (row) { s.appendRow(row); });
   });
+  // ⭐ 8번째 '발신이메일'·9번째 '발신번호' 열 — 법인별로 이 주소/번호에서 메일·문자를 보낸다
+  //   (비워두면 메일은 스크립트 소유자 계정, 문자는 담당자연락처). 예전에 만들어진 회사설정
+  //   시트에는 이 열이 없을 수 있어 헤더만 붙여준다.
+  if (sheet.getLastColumn() < 9) withLock(function () {
+    ensureHeaderColumn_(sheet, '발신이메일');
+    ensureHeaderColumn_(sheet, '발신번호');
+  });
 
   var data = sheet.getDataRange().getValues();
   var list = [];
@@ -681,10 +840,18 @@ function getCompanySettings() {
     if (!r[0]) continue;
     list.push({
       name: r[0], address: r[1], phone: r[2], rep: r[3],
-      managerName: r[4], managerPhone: r[5], managerEmail: r[6]
+      managerName: r[4], managerPhone: r[5], managerEmail: r[6], senderEmail: r[7] || '', senderPhone: r[8] ? String(r[8]) : ''
     });
   }
   return list;
+}
+
+function findCompanySetting_(name) {
+  var list = getCompanySettings();
+  for (var i = 0; i < list.length; i++) {
+    if (String(list[i].name) === String(name)) return list[i];
+  }
+  return null;
 }
 
 // ⭐ 설정 탭에서 회사를 추가/수정할 때 쓴다. originalName이 있으면(기존 회사 수정, 법인명 자체를
@@ -696,7 +863,8 @@ function upsertCompany(company, originalName) {
 
   var row = [
     company.name || '', company.address || '', company.phone || '', company.rep || '',
-    company.managerName || '', company.managerPhone || '', company.managerEmail || ''
+    company.managerName || '', company.managerPhone || '', company.managerEmail || '',
+    String(company.senderEmail || '').trim(), String(company.senderPhone || '').trim()
   ];
 
   return withLock(function () {
@@ -724,13 +892,12 @@ function deleteCompany(name) {
   });
 }
 
-// ⭐ 새 계약서를 작성할 때 처음 채워지는 초기값(근무장소/담당업무/근로시간 등)을 시트에서 관리.
+// ⭐ 새 계약서를 작성할 때 처음 채워지는 초기값(근무지/근로유형)을 시트에서 관리.
 //   설정 탭에서 고치면 다음에 새로 작성하는 계약서부터 반영된다(이미 작성 중인 계약에는 영향 없음).
-var DEFAULT_FIELDS = ['workPlace', 'duties', 'dailyWorkHours', 'weeklyWorkDays', 'startTime', 'endTime', 'breakTimeMinutes', 'breakTimeStart', 'breakTimeEnd'];
-var HARDCODED_DEFAULTS = {
-  workPlace: '새말센터', duties: '사무직', dailyWorkHours: '8', weeklyWorkDays: '5',
-  startTime: '08:00', endTime: '17:00', breakTimeMinutes: '60', breakTimeStart: '11:30', breakTimeEnd: '12:30'
-};
+// ⭐ minimumWage: 최저시급(원). 작성 탭에서 이보다 낮은 시급이면 경고한다. 매년 1월에 설정 탭에서
+//   새 금액으로 바꿔야 한다(2026년 10,320원).
+var DEFAULT_FIELDS = ['workPlace', 'wageType', 'minimumWage'];
+var HARDCODED_DEFAULTS = { workPlace: '새말센터', wageType: '사무&생산', minimumWage: '10320' };
 
 // ⭐ "08:00" 같은 시간 형식 문자열을 시트에 그대로 쓰면 구글시트가 자동으로 시간 값(Date)으로
 //   바꿔버릴 수 있어서, 읽고 쓸 때 모두 이를 방지/보정한다.
@@ -764,6 +931,8 @@ function saveDefaults(defaultsInput) {
   if (!sheet) { getDefaults(); sheet = ss.getSheetByName('기본값설정'); }
   var row = DEFAULT_FIELDS.map(function (f) { return defaultsInput[f] != null ? String(defaultsInput[f]) : ''; });
   return withLock(function () {
+    // ⭐ 헤더도 같이 맞춰 쓴다 — DEFAULT_FIELDS에 항목이 늘어난 뒤(예: minimumWage) 예전 시트에 저장해도 열 이름이 생긴다.
+    sheet.getRange(1, 1, 1, DEFAULT_FIELDS.length).setValues([DEFAULT_FIELDS]);
     var range = sheet.getRange(2, 1, 1, row.length);
     range.setNumberFormat('@');
     range.setValues([row]);
@@ -774,10 +943,10 @@ function saveDefaults(defaultsInput) {
 // ⭐ 근로자에게 계약서를 발송할 때(이메일/문자 공용) 쓰이는 문구. "메시지템플릿" 시트(최초 호출
 //   시 자동 생성)에 저장하며, 설정 탭에서 관리자가 직접 고칠 수 있다(수정 탭의 조항 편집과 같은
 //   {{token}} 자리표시자 + 드래그 변수 블록 방식). 문자(SMS)는 제목이 없어 본문만 쓰인다.
-//   아래 기본값은 지금까지 코드에 하드코딩돼 있던 문구를 그대로 {{token}} 자리표시자로만
-//   바꾼 것이라, 한 번도 고치지 않은 사용자에게는 기존과 완전히 동일하게 발송된다.
-var DEFAULT_MESSAGE_SUBJECT = '[전자계약] {{companyName}} 전자근로계약서 확인 및 서명 요청';
-var DEFAULT_MESSAGE_BODY = '안녕하세요. {{workerName}}님.\n{{companyName}}입니다.\n\n입사를 진심으로 환영 드립니다.\n근로계약 체결을 위해 전자근로계약서를 발송드리오니, 내용을 충분히 검토하신 후 전자서명 진행 부탁드립니다.\n\n문의 사항이 있으면 서명 전 반드시 아래 연락처로 연락 부탁드립니다.\n\n감사합니다.\n\n접속 링크: {{link}}\n접속 비밀번호: 본인 휴대전화번호\n\n담당자: {{managerName}}\n전화번호: {{managerPhone}}\n이메일: {{managerEmail}}';
+//   아래 기본값은 예전 임금계약서 코드의 발송 문구를 {{token}} 자리표시자로 옮긴 것이다.
+//   신규입사/연봉갱신 어느 쪽에도 쓸 수 있도록 "입사 환영" 문구는 넣지 않았다.
+var DEFAULT_MESSAGE_SUBJECT = '[전자계약] {{companyName}} 전자임금계약서 확인 및 서명 요청';
+var DEFAULT_MESSAGE_BODY = '안녕하세요. {{workerName}}님.\n{{companyName}}입니다.\n\n임금계약 체결을 위해 전자임금계약서를 발송드리오니, 내용을 충분히 검토하신 후 전자서명 진행 부탁드립니다.\n\n문의 사항이 있으면 서명 전 반드시 아래 연락처로 연락 부탁드립니다.\n\n감사합니다.\n\n접속 링크: {{link}}\n접속 비밀번호: 본인 휴대전화번호\n\n담당자: {{managerName}}\n전화번호: {{managerPhone}}\n이메일: {{managerEmail}}';
 
 function getMessageTemplate() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -822,8 +991,8 @@ function substituteMessageVariables(template, data) {
 //   최종 승인한 뒤에만(Index.html 쪽에서 그 시점에만 호출) 실제로 쓰인다.
 //   { dataUrl, status, message } 형태로 돌려줘서 managerApprove()가 실패 이유를 관리자에게
 //   alert로 보여줄 수 있다. status: 'ok' | 'no_match' | 'error'
-function getSealImagesMap_() {
-  var html = HtmlService.createHtmlOutputFromFile('Seals').getContent();
+function getSealImagesMap_(html) {
+  html = html || HtmlService.createHtmlOutputFromFile('Seals').getContent();
   var match = html.match(/const\s+sealImages\s*=\s*(\{[\s\S]*?\n\s*\});/);
   if (!match) {
     throw new Error('Seals.html에서 "const sealImages = { ... };" 형태의 객체를 찾을 수 없습니다.');
@@ -836,22 +1005,105 @@ function getSealImagesMap_() {
   }
 }
 
-function getSealImage(companyName) {
-  var map;
+// ⭐ 완료 계약서를 열 때 "서버 응답 지연"이 나던 원인 — Seals.html에는 모든 법인의 직인 base64가
+//   통째로 들어 있어 용량이 크다. 예전에는 열람할 때마다 그 파일 전체를 읽고(eval로) 객체 전체를
+//   만들어 한 장을 꺼냈다. 이제 ① 요청한 법인 한 장만 정규식으로 바로 잘라내고(eval 없이),
+//   ② 꺼낸 결과를 CacheService에 6시간 보관해서 다음부터는 Seals.html을 아예 읽지 않는다.
+//   Seals.html의 직인을 바꿨다면 편집기에서 clearSealCache를 한 번 실행하면 바로 반영된다.
+var SEAL_CACHE_SECONDS = 6 * 60 * 60;   // CacheService 최대 보관 시간
+var SEAL_CACHE_CHUNK = 90000;            // 캐시 값 1개당 100KB 제한 → 나눠서 저장
+
+function sealCacheKey_(companyName) {
+  var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, String(companyName), Utilities.Charset.UTF_8);
+  return 'seal_' + Utilities.base64EncodeWebSafe(digest);
+}
+
+function readSealCache_(key) {
   try {
-    map = getSealImagesMap_();
+    var cache = CacheService.getScriptCache();
+    var n = Number(cache.get(key + '_n'));
+    if (!n) return null;
+    var keys = [];
+    for (var i = 0; i < n; i++) keys.push(key + '_' + i);
+    var parts = cache.getAll(keys);
+    var out = '';
+    for (var j = 0; j < keys.length; j++) {
+      if (parts[keys[j]] == null) return null;
+      out += parts[keys[j]];
+    }
+    return out;
   } catch (e) {
-    Logger.log('직인 이미지 맵 로드 실패: ' + e);
+    return null;
+  }
+}
+
+function writeSealCache_(key, value) {
+  try {
+    var obj = {};
+    var n = 0;
+    for (var i = 0; i < value.length; i += SEAL_CACHE_CHUNK) obj[key + '_' + (n++)] = value.substr(i, SEAL_CACHE_CHUNK);
+    obj[key + '_n'] = String(n);
+    CacheService.getScriptCache().putAll(obj, SEAL_CACHE_SECONDS);
+  } catch (e) {
+    Logger.log('직인 캐시 저장 실패(무시하고 계속): ' + e);
+  }
+}
+
+// ⭐ Seals.html 텍스트에서 '법인명': 'data:image/...' 한 항목만 잘라낸다. 못 찾으면 null.
+function extractSealFromHtml_(html, companyName) {
+  var esc = String(companyName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  var re = new RegExp('([\'"])' + esc + '\\1\\s*:\\s*([\'"])(data:image\\/[^\'"]+)\\2');
+  var m = html.match(re);
+  return m ? m[3] : null;
+}
+
+function getSealImage(companyName) {
+  var key = sealCacheKey_(companyName);
+  var cached = readSealCache_(key);
+  if (cached) return { dataUrl: cached, status: 'ok' };
+
+  var html;
+  try {
+    html = HtmlService.createHtmlOutputFromFile('Seals').getContent();
+  } catch (e) {
+    Logger.log('Seals.html 로드 실패: ' + e);
     return { dataUrl: '', status: 'error', message: String(e) };
   }
-  var dataUrl = map[companyName];
+  var dataUrl = extractSealFromHtml_(html, companyName);
   if (!dataUrl) {
-    return {
-      dataUrl: '', status: 'no_match',
-      message: '"' + companyName + '"에 해당하는 직인 이미지가 Seals.html의 sealImages에 없습니다. 등록된 법인명: ' + (Object.keys(map).join(', ') || '(없음)')
-    };
+    // ⭐ 빠른 방식으로 못 찾았을 때만 예전처럼 객체 전체를 해석한다(따옴표 없는 키 등 예외 형식 대비,
+    //   못 찾은 이유와 등록된 법인명 목록을 알려주기 위해서도 필요).
+    var map;
+    try {
+      map = getSealImagesMap_(html);
+    } catch (e) {
+      Logger.log('직인 이미지 맵 로드 실패: ' + e);
+      return { dataUrl: '', status: 'error', message: String(e) };
+    }
+    dataUrl = map[companyName];
+    if (!dataUrl) {
+      return {
+        dataUrl: '', status: 'no_match',
+        message: '"' + companyName + '"에 해당하는 직인 이미지가 Seals.html의 sealImages에 없습니다. 등록된 법인명: ' + (Object.keys(map).join(', ') || '(없음)')
+      };
+    }
   }
+  writeSealCache_(key, dataUrl);
   return { dataUrl: dataUrl, status: 'ok' };
+}
+
+// ⭐ Seals.html의 직인 이미지를 바꾼 뒤 바로 반영하고 싶을 때 편집기에서 한 번 실행한다
+//   (안 해도 최대 6시간 뒤에는 자동으로 새 이미지를 읽는다).
+function clearSealCache() {
+  var names = getCompanySettings().map(function (c) { return c.name; });
+  var cache = CacheService.getScriptCache();
+  names.forEach(function (name) {
+    var key = sealCacheKey_(name);
+    var keys = [key + '_n'];
+    for (var i = 0; i < 50; i++) keys.push(key + '_' + i);
+    cache.removeAll(keys);
+  });
+  Logger.log('직인 캐시 삭제: ' + names.join(', '));
 }
 
 // ⭐ Solapi API 자격증명 — 코드에 직접 적지 않고 스크립트 속성에서 읽는다.
@@ -922,111 +1174,120 @@ function sendSolapiMessage(to, from, text) {
 }
 
 // ======================================================================
-// ⭐ 일회성 마이그레이션 — "계약대기"/"승인대기"/"계약목록" 시트를 새 열 구성으로
-//   재배열한다. 배포 후 Apps Script 편집기 상단의 함수 선택 드롭다운에서
-//   migrateSheetsToNewLayout을 고르고 ▶ 실행 버튼을 한 번만 누르면 된다.
-//   이미 새 레이아웃인 시트는 건드리지 않으므로(헤더로 판별) 여러 번 실행해도 안전하다.
-//   기존 행은 지우지 않고 그 안의 JSON 데이터에서 값을 다시 뽑아 새 열 순서로 옮겨 적는다.
+// ⭐ 임금테이블 — 근로유형별 시트(영업기본, 사무&생산 등)에서 월지급액이 일치하는 행을 찾아
+//   연봉/기본급/연장·야간수당/시간/시급을 돌려준다. 예전 임금계약서의 getWageDataFromSheet와
+//   같은 열 구성을 그대로 쓴다(1행은 헤더, A열은 쓰지 않음):
+//   B 연봉 | C 월지급액 | D 기본급 | E 연장수당 | F 야간수당 | (G~I 미사용) | J 기본시간 | K 시급 | L 연장시간 | M 야간시간
 // ======================================================================
+var WAGE_SHEET_NAMES = ['영업기본', '영업(35시간)', '영업(37.5시간)', '사무&생산', '감시적단속자'];
+var WAGE_COLUMNS = {
+  annualTotal: 1, monthlyTotal: 2, baseWage: 3, overtimeWage: 4, nightWage: 5,
+  baseHours: 9, hourlyWage: 10, overtimeHours: 11, nightHours: 12
+};
 
-// ⭐ 한 행(배열) 안에서 JSON 객체로 파싱되는 셀을 찾는다 — 이전 레이아웃마다 그 열의
-//   위치가 달라서, 위치를 가정하지 않고 "{"로 시작해서 JSON.parse가 성공하는 셀을 찾는
-//   방식으로 어떤 예전 레이아웃이었든 안전하게 돌 수 있게 한다.
-function extractJsonFromRow_(row) {
-  for (var i = 0; i < row.length; i++) {
-    var cell = row[i];
-    if (typeof cell === 'string' && cell.trim().charAt(0) === '{') {
-      try {
-        var parsed = JSON.parse(cell);
-        if (parsed && typeof parsed === 'object') return { index: i, data: parsed };
-      } catch (e) { /* JSON이 아닌 중괄호 문자열이면 건너뜀 */ }
-    }
+// ⭐ 작성 탭/설정 탭의 "근로유형" 목록 — 위 목록 중 실제로 스프레드시트에 있는 시트만 보여준다.
+//   (하나도 없으면 목록 전체를 그대로 돌려줘서, 시트 이름을 맞춰 만들면 되는지 알 수 있게 한다.)
+function getWageTypes() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var existing = WAGE_SHEET_NAMES.filter(function (name) { return !!ss.getSheetByName(name); });
+  return existing.length ? existing : WAGE_SHEET_NAMES;
+}
+
+function toNumber_(v) {
+  if (typeof v === 'number') return v;
+  var n = Number(String(v == null ? '' : v).replace(/[^0-9.\-]/g, ''));
+  return isNaN(n) ? 0 : n;
+}
+
+// ⭐ google.script.run으로 누구나 부를 수 있는 함수라, sheetName을 WAGE_SHEET_NAMES로 제한한다
+//   (안 그러면 '계약목록' 같은 다른 시트 이름을 넣어 내용을 들여다볼 수 있다).
+function getWageDataFromSheet(sheetName, targetMonthlyTotal) {
+  if (WAGE_SHEET_NAMES.indexOf(sheetName) === -1) return null;
+  var target = toNumber_(targetMonthlyTotal);
+  if (!target) return null;
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  if (!sheet) return null;
+
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (toNumber_(data[i][WAGE_COLUMNS.monthlyTotal]) !== target) continue;
+    var result = {};
+    for (var key in WAGE_COLUMNS) result[key] = toNumber_(data[i][WAGE_COLUMNS[key]]);
+    // ⭐ 시급이 비어 있으면 잘못된 행으로 본다(예전 화면의 "스프레드시트에 없는 금액" 검사와 동일).
+    return result.hourlyWage ? result : null;
   }
   return null;
 }
 
-function migrateSheetsToNewLayout() {
+// ======================================================================
+// ⭐ 권한 승인용 — 배포 계정으로 Apps Script 편집기에서 이 함수를 한 번 실행하면, 이 프로젝트가 쓰는
+//   권한(스프레드시트, 메일/Gmail, 외부 요청(Solapi), Drive, 트리거)을 한꺼번에 승인하는 창이 뜬다.
+//   "UrlFetchApp.fetch을(를) 호출할 수 있는 권한이 없습니다" 같은 오류가 나면 이 함수를 실행해
+//   승인한 뒤, 웹앱을 [배포 관리 → 수정 → 새 버전]으로 다시 배포한다. 실제로 메일/문자를 보내지는 않는다.
+// ======================================================================
+function authorizeServices() {
+  SpreadsheetApp.getActiveSpreadsheet().getName();
+  MailApp.getRemainingDailyQuota();
+  GmailApp.getAliases();
+  DriveApp.getRootFolder().getName();
+  ScriptApp.getProjectTriggers();
+  UrlFetchApp.fetch('https://api.solapi.com', { muteHttpExceptions: true });
+  Logger.log('권한 승인 완료: ' + Session.getEffectiveUser().getEmail());
+}
+
+// ======================================================================
+// ⭐ 진단용 — "유효하지 않은 링크"가 뜰 때 Apps Script 편집기에서 실행한다.
+//   1) 아래 DIAG_ID에 링크의 id= 값을 붙여넣고 2) 함수 목록에서 diagnoseContract 선택 → ▶ 실행
+//   3) 실행 로그를 확인한다. 시트에 아무것도 쓰지 않는다.
+// ======================================================================
+var DIAG_ID = '';
+
+function diagnoseContract(id) {
+  id = String(id || DIAG_ID || '').trim();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  return withLock(function () {
-    var result = {
-      계약대기: migrateDraftSheet_(ss),
-      승인대기: migratePendingSheet_(ss),
-      계약목록: migrateListSheet_(ss)
-    };
-    Logger.log('마이그레이션 결과: ' + JSON.stringify(result));
-    return result;
+  var out = [];
+  out.push('스프레드시트: ' + ss.getName() + ' (' + ss.getId() + ')');
+  out.push('webAppUrl_(): ' + webAppUrl_());
+  out.push('getService().getUrl(): ' + ScriptApp.getService().getUrl());
+  out.push('찾는 ID: ' + id);
+  [['계약대기', 0, 6], ['승인대기', 0, 8]].forEach(function (t) {
+    var sh = ss.getSheetByName(t[0]);
+    if (!sh) { out.push(t[0] + ': 시트 없음'); return; }
+    var rows = sh.getDataRange().getValues();
+    out.push(t[0] + ': 헤더 [' + rows[0].join(' | ') + '], 데이터 ' + (rows.length - 1) + '행');
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][t[1]]) === id) {
+        var json = String(rows[i][t[2]]);
+        var ok = true; try { JSON.parse(json); } catch (e) { ok = false; }
+        out.push('  → ' + (i + 1) + '행에서 발견, JSON 길이 ' + json.length + ', JSON 해석 ' + (ok ? '성공' : '실패'));
+      }
+    }
   });
-}
-
-function migrateDraftSheet_(ss) {
-  var sheet = ss.getSheetByName('계약대기');
-  if (!sheet || sheet.getLastRow() < 1) return '시트 없음';
-  var data = sheet.getDataRange().getValues();
-  if (String(data[0][1]) === '법인') return '이미 최신 레이아웃';
-
-  var newRows = [['ID', '법인', '성명', '전화번호', '이메일', '발송시간', '데이터']];
-  for (var i = 1; i < data.length; i++) {
-    var row = data[i];
-    if (!row[0]) continue;
-    var found = extractJsonFromRow_(row);
-    var d = found ? found.data : {};
-    var jsonStr = found ? row[found.index] : JSON.stringify(d);
-    newRows.push([
-      row[0], d.companyName || '', d.empName || '', d.contractPassword || d.empPhone || '',
-      d.workerContactEmail || '', d.sentAt || '', jsonStr
-    ]);
+  var list = ss.getSheetByName('계약목록');
+  if (!list) {
+    out.push('계약목록: 시트 없음');
+  } else {
+    var lr = list.getDataRange().getValues();
+    var jsonCol = headerColumnMap_(lr[0])['데이터(JSON)'];
+    out.push('계약목록: 헤더 [' + lr[0].join(' | ') + '], 데이터 ' + (lr.length - 1) + '행, 데이터(JSON) 열 위치 ' + (jsonCol === undefined ? '없음(마지막 열 사용)' : (jsonCol + 1) + '번째'));
+    if (jsonCol === undefined) jsonCol = lr[0].length - 1;
+    var hit = false;
+    for (var j = 1; j < lr.length; j++) {
+      var cell = String(lr[j][jsonCol]);
+      if (cell.indexOf(id) !== -1) {
+        hit = true;
+        var parsed = null; try { parsed = JSON.parse(cell); } catch (e) {}
+        out.push('  → ' + (j + 1) + '행 JSON 안에 ID 있음, 길이 ' + cell.length + ', 해석 ' + (parsed ? '성공, contractId=' + parsed.contractId : '실패'));
+      } else if (lr[j].join('').indexOf(id) !== -1) {
+        hit = true;
+        out.push('  → ' + (j + 1) + '행에 ID가 있지만 데이터(JSON) 열이 아닌 다른 열에 있음');
+      }
+    }
+    if (!hit) out.push('  → 계약목록에서 ID를 찾지 못함');
   }
-  sheet.clear();
-  sheet.getRange(1, 1, newRows.length, newRows[0].length).setValues(newRows);
-  return (newRows.length - 1) + '행 변환';
-}
-
-function migratePendingSheet_(ss) {
-  var sheet = ss.getSheetByName('승인대기');
-  if (!sheet || sheet.getLastRow() < 1) return '시트 없음';
-  var data = sheet.getDataRange().getValues();
-  if (String(data[0][1]) === '법인') return '이미 최신 레이아웃';
-
-  var urlBase = ScriptApp.getService().getUrl();
-  var newRows = [['ID', '법인', '성명', '전화번호', '이메일', '수신시간', '현황', '승인링크', '완료데이터(JSON)']];
-  for (var i = 1; i < data.length; i++) {
-    var row = data[i];
-    if (!row[0]) continue;
-    var found = extractJsonFromRow_(row);
-    var d = found ? found.data : {};
-    var jsonStr = found ? row[found.index] : JSON.stringify(d);
-    // ⭐ 승인링크는 mode=review로 새로 발급한다 — 예전 mode=view 링크는 비밀번호 게이트를
-    //   거치지 않으므로, 마이그레이션하면서 같이 고쳐둔다.
-    newRows.push([
-      row[0], d.companyName || '', d.empName || '', d.empPhone || '', d.workerContactEmail || '',
-      d.workerSignedAt || '', d.status || 'SIGNED_BY_WORKER', urlBase + "?id=" + row[0] + "&mode=review", jsonStr
-    ]);
-  }
-  sheet.clear();
-  sheet.getRange(1, 1, newRows.length, newRows[0].length).setValues(newRows);
-  return (newRows.length - 1) + '행 변환';
-}
-
-function migrateListSheet_(ss) {
-  var sheet = ss.getSheetByName('계약목록');
-  if (!sheet || sheet.getLastRow() < 1) return '시트 없음';
-  var data = sheet.getDataRange().getValues();
-  if (String(data[0][2]) === '전화번호') return '이미 최신 레이아웃';
-
-  var urlBase = ScriptApp.getService().getUrl();
-  var newRows = [['법인', '성명', '전화번호', '주소', '입사일', '발송일시', '제출일시', '완료일시', '문서링크', '데이터(JSON)']];
-  for (var i = 1; i < data.length; i++) {
-    var row = data[i];
-    var found = extractJsonFromRow_(row);
-    if (!found) continue; // JSON 데이터를 못 찾으면(빈 행 등) 건너뜀
-    var d = found.data;
-    newRows.push([
-      d.companyName || '', d.empName || '', d.empPhone || '', d.empAddress || '', d.joinDate || '',
-      d.sentAt || '', d.workerSignedAt || '', d.approvedAt || '',
-      urlBase + "?id=" + (d.contractId || '') + "&mode=view", row[found.index]
-    ]);
-  }
-  sheet.clear();
-  sheet.getRange(1, 1, newRows.length, newRows[0].length).setValues(newRows);
-  return (newRows.length - 1) + '행 변환';
+  var signed = null, err = '';
+  try { signed = loadSignedData(id); } catch (e) { err = String(e); }
+  out.push('loadSignedData 결과: ' + (signed ? '성공 (status=' + signed.status + ', 크기 ' + JSON.stringify(signed).length + '자)' : '없음 ' + err));
+  Logger.log(out.join('\n'));
+  return out.join('\n');
 }
