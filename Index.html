@@ -942,6 +942,17 @@
     return clean.replace(/(\d{6})(\d{1,7})/, '$1-$2').slice(0, 14);
   };
 
+  // ⭐ 직인 표시 크기. 법인별 직인 사진 자체의 여백 비율을 다 맞춰도(캔버스 대비 바깥
+  //   테두리 94% 안팎, 서로 1~2%p 이내) 실제 화면에 찍히는 크기가 왜인지 법인마다 달라서
+  //   (스크린샷을 픽셀로 실측 — 날짜 텍스트 크기로 캡처 배율 차이까지 보정한 값),
+  //   이미지 쪽을 더 건드리는 대신 법인별 배율을 코드에 직접 넣어 보정한다.
+  //   실측: 케이프라이드만 백두대간/보담/케이펙 대비 선형으로 약 1.57배 작게 찍힘.
+  //   새 법인을 추가했는데 크기가 유난히 안 맞으면 같은 방식(실측 비율)으로 여기 추가하면 된다.
+  const SEAL_BASE_SIZE = 98; // px — 기존 w-[98px] h-[98px]와 동일한 기준값
+  const SEAL_SIZE_SCALE = {
+    '(주)케이프라이드': 1.57,
+  };
+
   // ⭐ 법인별 정보 (서버 설정(회사설정 시트)을 못 불러왔을 때 쓰는 기본값 — 최초 렌더링이 비어보이지 않도록 유지)
   const DEFAULT_COMPANIES = [
     { name: '(주)케이프라이드', address: '강원도 횡성군 우천면 우천제2농공단지로 65-50', phone: 'T. 033-644-4467 F.033-644-1944', rep: '김도영', managerPhone: '033-340-0023', managerEmail: 'kpride@example.com', managerName: '송문주'},
@@ -2083,7 +2094,7 @@
                     <span className="text-gray-400 relative inline-block">
                       (인)
                       {contractStatus === 'COMPLETED' && sealImages[formData.companyName] && (
-                        <img src={sealImages[formData.companyName]} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[98px] h-[98px] max-w-none object-contain mix-blend-multiply opacity-80" alt="직인" />
+                        <img src={sealImages[formData.companyName]} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 max-w-none object-contain mix-blend-multiply opacity-80" style={{ width: SEAL_BASE_SIZE * (SEAL_SIZE_SCALE[formData.companyName] || 1), height: SEAL_BASE_SIZE * (SEAL_SIZE_SCALE[formData.companyName] || 1) }} alt="직인" />
                       )}
                     </span>
                   </div>
