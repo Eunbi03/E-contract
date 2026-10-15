@@ -388,9 +388,20 @@ function findRowById(sheet, id, idCol) {
 function findContractIdInList(listSheet, id) {
   if (!listSheet) return null;
   var data = listSheet.getDataRange().getValues();
+  if (!data.length) return null;
+  var col = headerColumnMap_(data[0]);
+  var linkCol = col['문서링크'];
+  var jsonCol = col['데이터(JSON)'];
+  // ⭐ "완료된 계약서 보기"가 계약이 쌓일수록 느려지던 원인 — 예전엔 매 행 JSON(서명
+  //   이미지가 포함돼 꽤 큼)을 contractId를 찾을 때까지 전부 parse했다. "문서링크" 열에는
+  //   이미 "...&id=<contractId>&mode=view"가 평문으로 들어있으므로, 먼저 이 가벼운 문자열
+  //   비교로 후보 행을 좁히고 JSON.parse는 실제로 일치하는 그 한 행에만 수행한다.
+  //   (만에 하나 문서링크 열을 못 찾으면, 예전처럼 전체를 훑는 방식으로 안전하게 되돌아간다.)
+  var needle = linkCol != null ? ('id=' + id) : null;
   for (var i = 1; i < data.length; i++) {
+    if (needle && String(data[i][linkCol]).indexOf(needle) === -1) continue;
     try {
-      var parsed = JSON.parse(data[i][9]);
+      var parsed = JSON.parse(data[i][jsonCol != null ? jsonCol : 9]);
       if (String(parsed.contractId) === String(id)) return parsed;
     } catch (e) {}
   }
