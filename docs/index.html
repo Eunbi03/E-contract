@@ -16,7 +16,7 @@
   body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Pretendard","Apple SD Gothic Neo","Malgun Gothic",sans-serif;color:var(--text);background:var(--bg);line-height:1.7;font-size:15px}
   a{color:var(--blue)}
   .wrap{display:flex;max-width:1160px;margin:0 auto}
-  nav.toc{width:230px;flex-shrink:0;position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;padding:28px 14px 40px 20px;border-right:1px solid var(--line);background:#fff}
+  nav.toc{width:262px;flex-shrink:0;position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;padding:28px 14px 40px 20px;border-right:1px solid var(--line);background:#fff}
   nav.toc .t{font-weight:800;color:var(--blue-d);font-size:15px}
   nav.toc .s{font-size:12px;color:var(--muted);margin-bottom:18px}
   nav.toc a{display:block;font-size:13.5px;color:#374151;text-decoration:none;padding:6px 10px;border-radius:7px}
@@ -59,6 +59,14 @@
   details>div{padding:0 0 12px}
   .check li{list-style:none;margin-left:-18px}
   .check li::before{content:"☐ ";color:var(--blue)}
+  .ask{display:inline-block;font-size:12px;font-weight:700;color:#7c2d12;background:#ffedd5;border:1px solid #fed7aa;border-radius:999px;padding:1px 10px;margin-left:8px;vertical-align:middle;white-space:nowrap}
+  h2 .ask{font-size:12.5px}
+  .upd{display:none;font-size:10.5px;font-weight:800;color:#fff;background:#ef4444;border-radius:999px;padding:0 7px;margin-left:6px;vertical-align:1px;line-height:17px}
+  nav.toc a.has-upd .upd{display:inline-block}
+  #updates{display:none;background:#fff;border:1px solid #fecaca;border-left:4px solid #ef4444;border-radius:10px;padding:13px 16px;margin:0 0 30px;font-size:14.5px}
+  #updates .h{font-weight:800;color:var(--ink);margin-bottom:6px}
+  #updates .d{font-weight:700;color:#b91c1c;margin:8px 0 2px;font-size:13.5px}
+  #updates ul{margin:0 0 4px}
   .menu{display:none}
   @media (max-width:960px){
     nav.toc{position:fixed;z-index:40;left:0;top:0;transform:translateX(-100%);transition:transform .2s;box-shadow:0 0 24px rgba(0,0,0,.15)}
@@ -76,19 +84,19 @@
   <div class="t">전자계약 관리자 설명서</div>
   <div class="s">근로계약서 · 임금계약서</div>
   <div class="grp">매일 쓰는 것</div>
-  <a href="#flow">1. 한눈에 보기</a>
-  <a href="#send">2. 계약서 보내기</a>
-  <a href="#approve">3. 승인하기 (직인)</a>
-  <a href="#done">4. 완료 계약서 보기</a>
+  <a href="#flow">1. 한눈에 보기<span class="upd">업데이트</span></a>
+  <a href="#send">2. 계약서 보내기<span class="upd">업데이트</span></a>
+  <a href="#approve">3. 승인하기 (직인)<span class="upd">업데이트</span></a>
+  <a href="#done">4. 완료 계약서 보기<span class="upd">업데이트</span></a>
   <div class="grp">가끔 하는 것</div>
-  <a href="#settings">5. 설정 바꾸기</a>
-  <a href="#mail">6. 메일·문자 발신처 바꾸기</a>
-  <a href="#deploy">7. 코드 업데이트 반영</a>
-  <a href="#auth">8. 권한 승인 (권한 검토)</a>
+  <a href="#settings">5. 설정 바꾸기<span class="upd">업데이트</span></a>
+  <a href="#mail">6. 메일·문자 발신처 바꾸기<span class="upd">업데이트</span></a>
+  <a href="#deploy">7. 코드 업데이트 반영<span class="upd">업데이트</span></a>
+  <a href="#auth">8. 권한 승인 (권한 검토)<span class="upd">업데이트</span></a>
   <div class="grp">문제가 생겼을 때</div>
-  <a href="#faq">9. 문제 해결</a>
-  <a href="#dont">10. 하면 안 되는 것</a>
-  <a href="#first">부록. 처음 설치 체크리스트</a>
+  <a href="#faq">9. 문제 해결<span class="upd">업데이트</span></a>
+  <a href="#dont">10. 하면 안 되는 것<span class="upd">업데이트</span></a>
+  <a href="#first">부록. 처음 설치 체크리스트<span class="upd">업데이트</span></a>
 </nav>
 
 <main><div class="c">
@@ -96,6 +104,9 @@
 <div class="meta">전자근로계약서 · 전자임금계약서 공용 · 최종 업데이트 2026년 10월 15일</div>
 <div class="box tip"><b>이렇게 읽으세요.</b> 평소에는 <b>1~4장</b>만 보면 됩니다. 설정을 바꾸거나 오류가 났을 때만 해당 장을 찾아보세요.
 두 계약서는 사용법이 거의 같고, 다른 부분만 <span class="tag l">근로</span><span class="tag w">임금</span> 표시를 붙였습니다.</div>
+
+<!-- ⭐ 업데이트 내역: 아래 #updates 박스와 목차의 "업데이트" 라벨은 맨 아래 UPDATES 목록으로 자동 생성됩니다. -->
+<div id="updates"><div class="h">🔔 최근 업데이트</div><div id="updates-list"></div></div>
 
 <!-- 1 -->
 <section id="flow">
@@ -109,9 +120,9 @@
 <p>관리자가 할 일은 <b>① 보내기</b>와 <b>③ 승인하기</b> 두 가지뿐입니다. 근로자가 서명해도 <b>관리자가 승인해야 계약이 끝납니다.</b></p>
 <table>
   <tr><th>무엇을</th><th>어디서</th></tr>
-  <tr><td>계약서 작성·발송, 문구·설정 변경</td><td><b>웹앱 주소</b>(즐겨찾기 해두세요) → 관리자 비밀번호 입력</td></tr>
+  <tr><td>계약서 작성·발송, 문구·설정 변경</td><td><b>웹앱 주소</b> → 관리자 비밀번호 입력</td></tr>
   <tr><td>진행 상황 확인, 승인 링크, 완료 링크</td><td>연결된 <b>구글 스프레드시트</b></td></tr>
-  <tr><td>코드 붙여넣기·배포·권한 승인</td><td>스프레드시트 메뉴 <b>확장 프로그램 → Apps Script</b></td></tr>
+  <tr><td>코드 붙여넣기·배포·권한 승인</td><td>관리자가 직접 하지 않습니다(개발 담당 영역).<br>필요하면 <span class="ask">문의: 경영지원팀 이은비</span></td></tr>
 </table>
 <table>
   <tr><th>시트</th><th>뜻</th><th>관리자가 볼 때</th></tr>
@@ -204,7 +215,7 @@
   <tr><td>계약서 조항·동의서 문구</td><td><b>수정</b> 탭 → 고칠 부분 선택 → 오른쪽 계약서에서 바로 수정 → 저장</td></tr>
   <tr><td>관리자 비밀번호</td><td><b>관리</b> 탭 (기존 비밀번호 필요)</td></tr>
   <tr><td><span class="tag w">임금</span>임금 금액표</td><td>스프레드시트의 근로유형별 시트(<code>사무&amp;생산</code> 등) 직접 수정</td></tr>
-  <tr><td>직인 이미지 교체</td><td>Apps Script의 <code>Seals.html</code> 수정 → 편집기에서 <code>clearSealCache</code> 한 번 실행</td></tr>
+  <tr><td>직인 이미지 교체</td><td><span class="ask">문의: 경영지원팀 이은비</span><br><span style="color:var(--muted);font-size:13px">(Apps Script의 <code>Seals.html</code> 수정 → <code>clearSealCache</code> 실행)</span></td></tr>
 </table>
 <div class="box tip"><b>참고</b> 설정·문구 변경은 <b>다음에 새로 보내는 계약서부터</b> 적용됩니다. 이미 보낸 계약서는 바뀌지 않습니다.</div>
 <div class="box warn"><b>⚠ 법인명</b>은 직인을 찾는 기준입니다. <code>회사설정</code>의 법인명과 <code>Seals.html</code>의 이름이 글자 하나까지 같아야 합니다. 표기는 <code>(주)</code>로 통일합니다(<code>㈜</code>는 다른 글자로 인식).</div>
@@ -226,7 +237,8 @@
 </ol>
 <p>별칭 등록 전에 보내면 발송큐 실패사유에 <i>"…다른 주소에서 메일 보내기에 등록되어 있지 않습니다"</i>가 남습니다. 등록 후 <a href="#resend">다시 보내기</a>를 하세요.</p>
 
-<h3>B. 반대로 — 다른 계정을 배포 계정으로 바꾸기</h3>
+<h3>B. 반대로 — 다른 계정을 배포 계정으로 바꾸기<span class="ask">문의: 경영지원팀 이은비</span></h3>
+<p style="color:var(--muted);font-size:13.5px">배포·권한 작업이 필요해 경영지원팀 이은비와 함께 진행합니다.</p>
 <p>예: 지금은 <code>main</code>이 보내는데, 앞으로 <code>hr</code> 계정이 직접 보내게(메일 한도도 hr 기준)</p>
 <ol>
   <li>스프레드시트를 <code>hr</code> 계정에 <b>편집자로 공유</b>합니다.</li>
@@ -247,7 +259,7 @@
 
 <!-- 7 -->
 <section id="deploy">
-<h2><span class="n">7.</span>코드 업데이트 반영 (새 버전 배포)</h2>
+<h2><span class="n">7.</span>코드 업데이트 반영 (새 버전 배포)<span class="ask">문의: 경영지원팀 이은비</span></h2>
 <p>개발자에게 새 <code>Code.gs</code>·<code>Index.html</code>을 받았을 때:</p>
 <ol>
   <li>Apps Script 편집기에서 각 파일 내용을 <b>전부 지우고 붙여넣기</b> → 저장(Ctrl+S)</li>
@@ -259,7 +271,7 @@
 
 <!-- 8 -->
 <section id="auth">
-<h2><span class="n">8.</span>권한 승인 (권한 검토)</h2>
+<h2><span class="n">8.</span>권한 승인 (권한 검토)<span class="ask">문의: 경영지원팀 이은비</span></h2>
 <p><b>언제?</b> 처음 설치할 때, 배포 계정을 바꿨을 때, 업데이트 후 <i>"…을(를) 호출할 수 있는 권한이 없습니다"</i> 오류가 날 때.</p>
 <ol>
   <li><b>배포 계정</b>으로 로그인한 상태에서 Apps Script 편집기를 엽니다.</li>
@@ -284,7 +296,8 @@
 
 <!-- 9 -->
 <section id="faq">
-<h2><span class="n">9.</span>문제 해결</h2>
+<h2><span class="n">9.</span>문제 해결<span class="ask">문의: 경영지원팀 이은비</span></h2>
+<p>아래로 해결되지 않으면 <b>발송큐 실패사유</b>나 <b>화면의 오류 문구</b>를 캡처해서 경영지원팀 이은비에게 보내 주세요.</p>
 
 <details open id="resend"><summary>실패한 발송을 다시 보내고 싶어요</summary><div>
   <ol><li><code>발송큐</code>에서 상태가 <code>FAILED</code>인 칸을 <code>PENDING</code>으로 바꿉니다.</li>
@@ -351,7 +364,7 @@
 
 <!-- appendix -->
 <section id="first">
-<h2><span class="n">부록.</span>처음 설치 체크리스트</h2>
+<h2><span class="n">부록.</span>처음 설치 체크리스트<span class="ask">문의: 경영지원팀 이은비</span></h2>
 <p>새 스프레드시트·새 계정에 처음 설치하거나 <b>파일 → 사본 만들기</b>로 복사했을 때 한 번만 합니다.</p>
 <ul class="check">
   <li>Apps Script에 <code>Code.gs</code>, <code>Index.html</code>, <code>Seals.html</code>이 있는지 확인</li>
@@ -370,5 +383,51 @@
 
 </div></main>
 </div>
+<script>
+/* ======================================================================
+   ⭐ 설명서를 고쳤을 때 여기에 한 줄씩 추가하세요(최신을 맨 위에).
+   - date: 업데이트한 날짜 'YYYY-MM-DD'
+   - sections: 바뀐 장의 id (flow, send, approve, done, settings, mail, deploy, auth, faq, dont, first)
+               → 왼쪽 목차에 "업데이트" 라벨이 붙습니다.
+   - items: "최근 업데이트" 박스에 보일 내용
+   업데이트 날짜로부터 30일이 지나면 박스와 라벨은 자동으로 사라집니다(내역은 여기 그대로 남음).
+   ====================================================================== */
+const UPDATES = [
+  {
+    date: '2026-10-15',
+    sections: ['flow', 'send', 'settings', 'mail', 'deploy', 'auth', 'faq', 'first'],
+    items: [
+      '설명서를 근로계약서·임금계약서 공용으로 새로 정리했습니다.',
+      '임금계약서 작성 방법(근로자별 입사년도·월지급액, 직접 입력, 최저시급 경고)을 추가했습니다.',
+      '메일·문자 발신처 바꾸기(6장)를 추가했습니다.',
+      '코드 업데이트·권한 승인·직인 교체·문제 해결은 경영지원팀 이은비에게 문의하도록 바꿨습니다.'
+    ]
+  }
+];
+const UPDATE_SHOW_DAYS = 30;
+
+(function () {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const recent = UPDATES.filter(u => {
+    const d = new Date(u.date + 'T00:00:00');
+    const days = (today - d) / 86400000;
+    return days >= 0 && days < UPDATE_SHOW_DAYS;
+  });
+  if (!recent.length) return;
+  const list = document.getElementById('updates-list');
+  recent.forEach(u => {
+    const p = u.date.split('-');
+    const d = document.createElement('div'); d.className = 'd'; d.textContent = p[0] + '년 ' + Number(p[1]) + '월 ' + Number(p[2]) + '일';
+    const ul = document.createElement('ul');
+    u.items.forEach(t => { const li = document.createElement('li'); li.textContent = t; ul.appendChild(li); });
+    list.appendChild(d); list.appendChild(ul);
+    u.sections.forEach(id => {
+      const a = document.querySelector('nav.toc a[href="#' + id + '"]');
+      if (a) a.classList.add('has-upd');
+    });
+  });
+  document.getElementById('updates').style.display = 'block';
+})();
+</script>
 </body>
 </html>
